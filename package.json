@@ -1,0 +1,97 @@
+{
+  "name": "@vectros-ai/react",
+  "version": "0.5.0",
+  "description": "Vectros React toolkit — the auth stack, Vectros API token cache, MFA, and UI primitives shared by the Vectros reference apps (admin-app, app.vectros.ai). Provider-agnostic by design: swap Cognito for Auth0/Clerk/OIDC behind a single adapter.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vectros-ai/vectros-react",
+    "directory": "packages/react"
+  },
+  "homepage": "https://vectros.ai",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "vectros",
+    "react",
+    "auth",
+    "cognito",
+    "mfa",
+    "mui",
+    "reference-app"
+  ],
+  "peerDependencies": {
+    "@emotion/react": ">=11.14",
+    "@emotion/styled": ">=11.14",
+    "@mui/icons-material": ">=7",
+    "@mui/material": ">=7",
+    "@tanstack/react-query": ">=5",
+    "@vectros-ai/sdk": ">=0.9.0",
+    "aws-amplify": ">=6.16",
+    "react": ">=19",
+    "react-dom": ">=19",
+    "react-intl": ">=10",
+    "react-router": ">=7"
+  },
+  "dependencies": {
+    "@zxcvbn-ts/core": "^3.0.4",
+    "@zxcvbn-ts/language-common": "^3.0.4",
+    "@zxcvbn-ts/language-en": "^3.0.2",
+    "jose": "^5.10.0",
+    "qrcode.react": "^4.2.0"
+  },
+  "devDependencies": {
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@mui/icons-material": "7.3.11",
+    "@mui/material": "7.3.11",
+    "@tanstack/react-query": "5.100.14",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.1.0",
+    "@testing-library/user-event": "14.5.2",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
+    "@vectros-ai/sdk": "0.29.7-staging.a9506c89",
+    "aws-amplify": "6.16.3",
+    "eslint": "9.39.4",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react-hooks": "5.1.0",
+    "globals": "15.14.0",
+    "jsdom": "29.1.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "react-intl": "^10.1.11",
+    "react-router": "^7.16.0",
+    "tsup": "^8.0.0",
+    "typescript": "5.7.2",
+    "typescript-eslint": "8.20.0",
+    "vitest": "4.1.7"
+  }
+}
