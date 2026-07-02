@@ -38,7 +38,7 @@ export function CurrentTenantProvider({
   initialMemberships,
   initialTenant,
 }: CurrentTenantProviderProps): React.JSX.Element {
-  const { getMemberships, getActiveTenant, setActiveTenant } = useAuth();
+  const { user, getMemberships, getActiveTenant, setActiveTenant } = useAuth();
   const queryClient = useQueryClient();
 
   const seeded = initialMemberships !== undefined;
@@ -49,10 +49,25 @@ export function CurrentTenantProvider({
   // Loading only when we actually have to fetch (not when seeded for tests).
   const [loading, setLoading] = useState<boolean>(!seeded);
 
-  // One-shot load of memberships + active tenant. Skipped when seeded.
+  // Identity of the signed-in user; the membership load keys on this so it
+  // RE-RUNS when the user signs in (see the effect below).
+  const userSub = user?.sub ?? null;
+
+  // Load memberships + the active tenant from the auth adapter, and RE-LOAD
+  // whenever the signed-in identity changes. Skipped when seeded (tests).
+  //
+  // Keying on the user's identity — not just the first mount — is essential:
+  // this provider sits ABOVE the router, so it does NOT remount when the user
+  // navigates from the login page into the app after signing in. A mount-only
+  // load would run exactly once, BEFORE sign-in when there is no session, read
+  // an empty membership set, and never run again — leaving the active tenant
+  // null and every scope-gated surface (the entire sidebar nav) hidden until a
+  // full page reload. Re-running on the identity change resolves the tenant the
+  // moment the user signs in, so the menu renders correctly on the first login.
   useEffect(() => {
     if (seeded) return;
     let cancelled = false;
+    setLoading(true);
     void (async (): Promise<void> => {
       try {
         const [list, active] = await Promise.all([getMemberships(), getActiveTenant()]);
@@ -77,7 +92,7 @@ export function CurrentTenantProvider({
     return (): void => {
       cancelled = true;
     };
-  }, [seeded, getMemberships, getActiveTenant]);
+  }, [seeded, userSub, getMemberships, getActiveTenant]);
 
   const setTenant = useCallback(
     async (next: TenantId): Promise<void> => {

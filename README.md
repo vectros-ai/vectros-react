@@ -1,5 +1,8 @@
 # @vectros-ai/react
 
+[![npm](https://img.shields.io/npm/v/@vectros-ai/react)](https://www.npmjs.com/package/@vectros-ai/react)
+[![license](https://img.shields.io/npm/l/@vectros-ai/react)](https://www.apache.org/licenses/LICENSE-2.0)
+
 The shared React toolkit behind the Vectros reference apps — **admin-app** (control
 plane) and **app.vectros.ai** (data plane). It packages the parts both apps need to
 look and behave the same without copy-paste:
@@ -15,6 +18,16 @@ look and behave the same without copy-paste:
 - **MFA** — a TOTP enrollment wizard and the `/account` 2FA pattern.
 - **UI primitives** — `AuthCard`, `PasswordField` (+ strength meter), `AppLayout`
   chrome, `IntlProvider` scaffolding, and the tenant/context switchers.
+
+## Install
+
+```bash
+npm install @vectros-ai/react
+```
+
+This is a toolkit for an existing app, so it expects a set of peer
+dependencies the app already provides (React, MUI, TanStack Query, the
+Vectros SDK, and more) — see [Peer dependencies](#peer-dependencies) below.
 
 ## Status
 
