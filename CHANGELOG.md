@@ -3,6 +3,14 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.5.2 — 2026-07-03
+
+### Changed
+
+- Updated the `@vectros-ai/sdk` version the toolkit is built and tested against to
+  **0.32.0**. No functional changes; the peer-dependency range (`>=0.9.0`) is
+  unchanged.
+
 ## 0.5.1 — 2026-07-01
 
 ### Fixed
