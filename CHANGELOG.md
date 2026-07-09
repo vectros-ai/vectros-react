@@ -3,6 +3,16 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.6.0 — 2026-07-08
+
+### Added
+
+- `VersionUpdateBanner` — a non-blocking prompt that polls a `version.json`
+  manifest (on an interval and on tab focus/visibility) and, when the deployed
+  build id differs from the one baked into the running bundle, offers a
+  user-initiated refresh. Lets a long-open tab recover from version skew (a
+  pruned lazy-loaded chunk) without ever forcing a reload.
+
 ## 0.5.2 — 2026-07-03
 
 ### Changed

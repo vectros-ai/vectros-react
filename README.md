@@ -18,6 +18,9 @@ look and behave the same without copy-paste:
 - **MFA** — a TOTP enrollment wizard and the `/account` 2FA pattern.
 - **UI primitives** — `AuthCard`, `PasswordField` (+ strength meter), `AppLayout`
   chrome, `IntlProvider` scaffolding, and the tenant/context switchers.
+- **Version-update banner** — `VersionUpdateBanner` polls a `version.json`
+  manifest and offers a user-initiated refresh when a newer build is deployed,
+  so a long-open tab never strands on a stale shell.
 
 ## Install
 

@@ -39,6 +39,8 @@ export { MetaList, MetaRow } from './components/MetaList';
 export type { MetaListProps, MetaRowProps } from './components/MetaList';
 export { ConfirmDialog } from './components/ConfirmDialog';
 export type { ConfirmDialogProps } from './components/ConfirmDialog';
+export { VersionUpdateBanner } from './components/VersionUpdateBanner';
+export type { VersionUpdateBannerProps } from './components/VersionUpdateBanner';
 
 // i18n — catalog-agnostic react-intl wrapper (the app supplies its catalog).
 export { IntlProvider, I18N_DEFAULT_LOCALE } from './i18n/IntlProvider';
