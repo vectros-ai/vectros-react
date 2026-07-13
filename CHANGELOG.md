@@ -3,6 +3,13 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.6.1 — 2026-07-13
+
+### Changed
+
+- Documentation: added a "Security & trust" section to the README linking the
+  compliance and trust guide. No code or API changes.
+
 ## 0.6.0 — 2026-07-08
 
 ### Added

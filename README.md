@@ -43,6 +43,12 @@ react-router 7, `aws-amplify`, and `@vectros-ai/sdk` (all `peerDependencies`). T
 small leaf utilities (`jose`, `qrcode.react`, `@zxcvbn-ts/*`) ship as regular
 dependencies.
 
+## Security & trust
+
+These components reach Vectros with least-privilege scoped keys over a secure, per-customer-isolated
+back-end. For the platform's full security and trust posture, see the
+[compliance and trust guide](https://docs.vectros.ai/guides/operations-trust/compliance).
+
 ## License
 
 Apache-2.0.
