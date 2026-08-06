@@ -7,7 +7,7 @@
 // or simply hides the gated surface).
 //
 // Example:
-//   <ScopeGate action="admin:users">
+//   <ScopeGate action="users:r">
 //     <NavLink to="/members">Members</NavLink>
 //   </ScopeGate>
 //
@@ -21,7 +21,11 @@ import type { ReactNode } from 'react';
 import { useScopeGate } from './useScopeGate';
 
 export interface ScopeGateProps {
-  /** The action string to gate on. Matches verbatim against allowed_actions; wildcard `*` grants all. */
+  /**
+   * The action string to gate on — the compact `resource:ops` form (e.g.
+   * `'users:r'`) unions ops across every unqualified matching grant; any
+   * other shape matches only verbatim. Wildcard `*` grants all.
+   */
   readonly action: string;
   /** Rendered when the gate denies access. Defaults to nothing. */
   readonly fallback?: ReactNode;

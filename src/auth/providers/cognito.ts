@@ -98,6 +98,13 @@ interface AppContextWire {
   readonly status?: string;
 }
 
+/**
+ * Ceiling on the pages of app-context data one listing will chase (100 per page).
+ * It bounds a cursor that never goes null; a successful drain spends one further
+ * request confirming exhaustion, so it is not a bound on the requests made.
+ */
+const CONTEXT_MAX_PAGES = 50;
+
 // ---------------------------------------------------------------------------
 // Error mapping — translate Amplify error names to AuthError codes so the
 // rest of the app can pattern-match on provider-agnostic codes.
@@ -577,8 +584,17 @@ export class CognitoAuthProvider implements AuthProviderAdapter {
 
     const out: AppContextSummary[] = [];
     let startFrom: string | undefined;
-    // Safety ceiling (50 × 100 = 5000) — guards a non-advancing cursor.
-    for (let page = 0; page < 50; page++) {
+    // Page until the cursor goes null — never on a short or empty page, which is
+    // normal here because filtering is applied per page after that page's cursor
+    // is captured. `<=`, so the last iteration is a terminal PROBE rather than a
+    // page of data: a full page still carries a live cursor (the server sets one
+    // whenever it stops on `limit`, being unable to know the next read is empty),
+    // so a listing of exactly CONTEXT_MAX_PAGES × 100 would otherwise be fetched
+    // in full and then discarded. On exhausting the allowance we THROW: handing
+    // back a partial enumeration silently is the failure a drain exists to
+    // prevent, and this list feeds a context switcher, where a missing entry
+    // reads as "you don't have access" rather than as an error.
+    for (let page = 0; page <= CONTEXT_MAX_PAGES; page++) {
       const qs = new URLSearchParams({ tenant: kind, limit: '100' });
       if (options?.onlyMine) qs.set('mine', 'true');
       if (startFrom) qs.set('startFrom', startFrom);
@@ -588,7 +604,18 @@ export class CognitoAuthProvider implements AuthProviderAdapter {
       );
       if (!resp.ok) {
         // No session / not an owner / nothing configured → empty, never throw.
-        if (resp.status === 401 || resp.status === 403 || resp.status === 404) return out;
+        // That answer is only honest on the FIRST page, where it means "there is
+        // nothing here for you". Mid-drain the same status means the listing was
+        // interrupted, and returning the pages already read would be the silent
+        // truncation this loop is built to avoid — so it throws instead.
+        if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
+          if (startFrom === undefined) return out;
+          throw new AuthError(
+            'UNKNOWN',
+            `Failed to list app contexts: ${resp.status} part-way through the listing ` +
+              `(${out.length} read). Refusing to return a partial result.`,
+          );
+        }
         const body = await resp.text().catch(() => '');
         throw new AuthError('UNKNOWN', `Failed to list app contexts: ${resp.status} ${body}`);
       }
@@ -606,10 +633,17 @@ export class CognitoAuthProvider implements AuthProviderAdapter {
         }
       }
       const next = json?.nextCursor ?? null;
-      if (!next) break;
+      if (!next) return out;
       startFrom = next;
     }
-    return out;
+    // Both numbers, because they describe different incidents: "5000 read over
+    // 51 requests" is a listing genuinely larger than the ceiling, "0 read over
+    // 51 requests" is a cursor that never resolves.
+    throw new AuthError(
+      'UNKNOWN',
+      `Failed to list app contexts: still not exhausted after ${CONTEXT_MAX_PAGES + 1} ` +
+        `requests (${out.length} read). Refusing to return a partial result.`,
+    );
   }
 
   // ------------------------------------------------------------------------

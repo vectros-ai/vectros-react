@@ -22,12 +22,14 @@ import { TestIntlProvider } from '../test/intl';
 // host passes a node); tests use a literal brand + a stub switcher node.
 const BRAND_NAME = 'Vectros Admin';
 
-// Mirrors the admin-app nav passed to the shared AppLayout in App.tsx.
+// Mirrors the admin-app nav passed to the shared AppLayout in App.tsx — real
+// grantable `resource:ops` verbs, not the retired `admin:<resource>` spelling
+// (which no stored scope can ever carry; see useScopeGate's own tests for why).
 const NAV_ITEMS: ReadonlyArray<NavItemSpec> = [
   { to: '/', labelId: 'layout.navWelcome', gateAction: null },
-  { to: '/members', labelId: 'layout.navMembers', gateAction: 'admin:users' },
-  { to: '/keys', labelId: 'layout.navKeys', gateAction: 'admin:keys' },
-  { to: '/logs', labelId: 'layout.navLogs', gateAction: 'admin:logs' },
+  { to: '/members', labelId: 'layout.navMembers', gateAction: 'users:r' },
+  { to: '/keys', labelId: 'layout.navKeys', gateAction: 'keys:r' },
+  { to: '/logs', labelId: 'layout.navLogs', gateAction: 'logs:r' },
 ];
 
 // AppLayout gates nav via the <ScopeGate> component, which calls useScopeGate
@@ -48,12 +50,14 @@ vi.mock('../auth', async (importOriginal) => {
 const wildcardGate = {
   loading: false,
   allowedActions: ['*'] as ReadonlyArray<string>,
+  identity: {} as Readonly<Record<string, string>>,
   can: () => true,
 };
 
 const noScopeGate = {
   loading: false,
   allowedActions: [] as ReadonlyArray<string>,
+  identity: {} as Readonly<Record<string, string>>,
   can: () => false,
 };
 

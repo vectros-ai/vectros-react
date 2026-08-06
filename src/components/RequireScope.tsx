@@ -23,7 +23,12 @@ import { Navigate } from 'react-router';
 import { useScopeGate } from '../auth/useScopeGate';
 
 export interface RequireScopeProps {
-  /** The action the route requires. Matches verbatim against allowed actions; wildcard `*` grants all. */
+  /**
+   * The action the route requires — the compact `resource:ops` form (e.g.
+   * `'users:r'`) unions ops across every unqualified matching grant; any
+   * other shape matches only verbatim. Wildcard `*` grants all. See
+   * {@link canPerform} for the exact rules.
+   */
   readonly action: string;
   /** The signed-in, allowed content. */
   readonly children: ReactNode;

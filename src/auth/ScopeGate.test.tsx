@@ -39,11 +39,12 @@ describe('<ScopeGate>', () => {
     mockUseScopeGate.mockReturnValue({
       loading: true,
       allowedActions: [],
+      identity: {},
       can: () => false,
     });
 
     render(
-      <ScopeGate action="admin:users" fallback={<Deny />}>
+      <ScopeGate action="users:r" fallback={<Deny />}>
         <Allow />
       </ScopeGate>,
     );
@@ -58,11 +59,12 @@ describe('<ScopeGate>', () => {
     mockUseScopeGate.mockReturnValue({
       loading: false,
       allowedActions: [],
+      identity: {},
       can: () => false,
     });
 
     render(
-      <ScopeGate action="admin:users" fallback={<Deny />}>
+      <ScopeGate action="users:r" fallback={<Deny />}>
         <Allow />
       </ScopeGate>,
     );
@@ -74,12 +76,13 @@ describe('<ScopeGate>', () => {
   it('renders children when the gate allows the action', () => {
     mockUseScopeGate.mockReturnValue({
       loading: false,
-      allowedActions: ['admin:users'],
-      can: (a) => a === 'admin:users',
+      allowedActions: ['users:r'],
+      identity: {},
+      can: (a) => a === 'users:r',
     });
 
     render(
-      <ScopeGate action="admin:users" fallback={<Deny />}>
+      <ScopeGate action="users:r" fallback={<Deny />}>
         <Allow />
       </ScopeGate>,
     );
@@ -89,16 +92,16 @@ describe('<ScopeGate>', () => {
   });
 
   it('passes the exact action string through to can() (no widening)', () => {
-    const can = vi.fn((a: string) => a === 'admin:keys');
-    mockUseScopeGate.mockReturnValue({ loading: false, allowedActions: ['admin:keys'], can });
+    const can = vi.fn((a: string) => a === 'keys:r');
+    mockUseScopeGate.mockReturnValue({ loading: false, allowedActions: ['keys:r'], identity: {}, can });
 
     render(
-      <ScopeGate action="admin:keys">
+      <ScopeGate action="keys:r">
         <Allow />
       </ScopeGate>,
     );
 
-    expect(can).toHaveBeenCalledWith('admin:keys');
+    expect(can).toHaveBeenCalledWith('keys:r');
     expect(screen.getByTestId('allow')).toBeInTheDocument();
   });
 
@@ -106,11 +109,12 @@ describe('<ScopeGate>', () => {
     mockUseScopeGate.mockReturnValue({
       loading: false,
       allowedActions: [],
+      identity: {},
       can: () => false,
     });
 
     const { container } = render(
-      <ScopeGate action="admin:users">
+      <ScopeGate action="users:r">
         <Allow />
       </ScopeGate>,
     );

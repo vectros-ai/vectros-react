@@ -47,46 +47,129 @@ export interface ScopeGateValue {
   /** The decoded allowed_actions claim. Empty array if the token had no claim or decode failed. */
   readonly allowedActions: ReadonlyArray<string>;
   /**
-   * Predicate: can the current session perform `action`? Wildcard `*` in
-   * the allowed_actions list grants all actions. Specific entries match
-   * literally — there is no resource:op pattern matching here (callers
-   * pass the exact action string they want to check).
+   * The decoded `scope.identity` claim — the ownership dimensions (canonical
+   * `scope:<ns>` keys) THIS session's own credential holds, if any. Empty
+   * object for a credential with none (an OWNER session, which is never
+   * bound to a specific identity — the claim is omitted from the token
+   * entirely) or while loading. See {@link decodeIdentity} for the exact
+   * semantics and why this answers a different question than `can(action)`.
+   */
+  readonly identity: Readonly<Record<string, string>>;
+  /**
+   * Predicate: can the current session perform `action`? Wildcard `*` grants
+   * everything. For the compact `resource:ops` form (e.g. `'users:r'`,
+   * `'users:cru'`), this unions ops across every UNQUALIFIED granted entry
+   * for that resource — so a caller holding `users:c` + `users:r` + `users:u`
+   * as three separate entries, or one combined `users:cru` entry, both
+   * satisfy `can('users:ru')`. See {@link canPerform} for the exact rules
+   * (in particular: why a qualified grant does NOT count toward an
+   * unqualified ask, and why a malformed ops string falls back to an exact
+   * string match rather than silently matching nothing).
    */
   readonly can: (action: string) => boolean;
 }
 
-// Module-level decode cache keyed by raw token string. Avoids re-decoding
-// the same token on every render across multiple useScopeGate consumers.
-const decodedByToken = new Map<string, ReadonlyArray<string>>();
+/** The letters the platform's compact `resource:ops[:qualifier]` grammar recognizes. */
+const CRUDS_LETTERS = 'cruds';
+
+/** True when every character of `s` is a recognized ops letter, and `s` is non-empty. */
+function isOpsString(s: string): boolean {
+  return s.length > 0 && [...s].every((c) => CRUDS_LETTERS.includes(c));
+}
 
 /**
- * Decode an st_*-shaped JWT and extract the union of allowed actions across
- * its scope clauses.
+ * Ops-aware capability check: does `allowedActions` grant `action`?
+ *
+ * `action` may be:
+ * - the wildcard `*` (not meaningful as an ask, but handled for symmetry — `*` is
+ *   never true unless `allowedActions` itself carries wildcard, same as any other ask);
+ * - the compact `resource:ops` form — e.g. `'users:r'`, `'users:cru'` — evaluated by
+ *   OPS-UNION: every entry in `allowedActions` shaped exactly `resource:ops` (no
+ *   qualifier) for the SAME resource contributes its ops letters to a running set;
+ *   `action` is granted when every one of its own ops letters is in that set. This is
+ *   what lets a caller's grant be spread across several entries (`users:c`, `users:r`,
+ *   `users:u`) or combined into one (`users:cru`) and still be recognized identically —
+ *   the shape the split-entries authoring path produces and the combined-entry path
+ *   also produces are the same grant.
+ * - anything else (a bare custom verb, a 3-segment qualified form like
+ *   `'documents:r:foo'`, or a malformed ops string) — falls back to an EXACT string
+ *   match against `allowedActions`. This is deliberate, not an oversight: a QUALIFIED
+ *   grant narrows to a specific resource instance, so it must NOT be unioned into an
+ *   UNQUALIFIED ask — doing so would let a caller scoped to one record type or
+ *   namespace appear to hold the resource generally. Whether a qualifier is actually
+ *   meaningful for a given resource+op is a platform authorization-grammar question
+ *   (`TokenScope`'s qualifiable-resource / sensitive-reveal axes) this client-side
+ *   predicate does not attempt to replicate — the exact-match fallback is the
+ *   conservative choice: never wider than what the caller can prove.
+ */
+export function canPerform(
+  allowedActions: ReadonlyArray<string>,
+  action: string,
+): boolean {
+  if (allowedActions.includes('*')) return true;
+
+  const askedSegs = action.split(':');
+  if (askedSegs.length === 2) {
+    const [resource, askedOps] = askedSegs;
+    if (resource && isOpsString(askedOps ?? '')) {
+      let grantedOps = '';
+      for (const raw of allowedActions) {
+        const segs = raw.split(':');
+        if (segs.length !== 2) continue; // qualified (or malformed) — not unioned in
+        const [grantedResource, grantedOpsStr] = segs;
+        if (grantedResource !== resource) continue;
+        if (!isOpsString(grantedOpsStr ?? '')) continue;
+        for (const c of grantedOpsStr ?? '') {
+          if (!grantedOps.includes(c)) grantedOps += c;
+        }
+      }
+      return [...(askedOps ?? '')].every((c) => grantedOps.includes(c));
+    }
+  }
+
+  return allowedActions.includes(action);
+}
+
+/** What both public decode functions below extract from one token. */
+interface DecodedScopeClaims {
+  readonly allowedActions: ReadonlyArray<string>;
+  readonly identity: Readonly<Record<string, string>>;
+}
+
+const EMPTY_ACTIONS: ReadonlyArray<string> = [];
+const EMPTY_IDENTITY: Readonly<Record<string, string>> = {};
+const EMPTY_CLAIMS: DecodedScopeClaims = { allowedActions: EMPTY_ACTIONS, identity: EMPTY_IDENTITY };
+
+// Module-level decode cache keyed by raw token string. Avoids re-decoding
+// (and re-parsing the same JWT payload twice, once per claim) on every render
+// across multiple useScopeGate consumers.
+const decodedByToken = new Map<string, DecodedScopeClaims>();
+
+/**
+ * Decode an st_*-shaped JWT's `scope` claim once, extracting both facets
+ * `decodeAllowedActions`/`decodeIdentity` read. Not exported — those two
+ * remain the public, independently-cacheable surface (mirrors how they were
+ * two separate functions before `identity` existed, so existing callers of
+ * `decodeAllowedActions` are unaffected).
  *
  * Token shape: `st_(live|test)_<base64url-header>.<base64url-payload>.<base64url-sig>`.
  * (Some callers may pass the bare JWT without the `st_<env>_` prefix — we
  * handle both.)
  *
- * The relevant claim is `scope.scopes[]` — a list of clauses, each carrying an
- * `allowed_actions` string array. An owner's token is a single clause `["*"]`;
- * a scoped user's clauses carry their profile's specific actions. We union the
- * actions across every clause.
- *
  * **No signature verification.** The backend re-verifies on every request, and
  * client-side scope is a UX optimization only. Forged claims widen the visible
  * UI surface but don't unlock API calls.
  */
-export function decodeAllowedActions(token: string): ReadonlyArray<string> {
+function decodeScopeClaims(token: string): DecodedScopeClaims {
   const cached = decodedByToken.get(token);
   if (cached) return cached;
 
-  const empty: ReadonlyArray<string> = [];
   // Strip the st_<env>_ prefix if present.
   const stripped = token.replace(/^st_(live|test)_/, '');
   const parts = stripped.split('.');
   if (parts.length !== 3) {
-    decodedByToken.set(token, empty);
-    return empty;
+    decodedByToken.set(token, EMPTY_CLAIMS);
+    return EMPTY_CLAIMS;
   }
   try {
     // base64url → standard base64 + padding.
@@ -96,27 +179,83 @@ export function decodeAllowedActions(token: string): ReadonlyArray<string> {
     const padded = standard + '='.repeat(padding);
     const json = atob(padded);
     const claims = JSON.parse(json) as {
-      scope?: { scopes?: ReadonlyArray<{ allowed_actions?: unknown }> };
+      scope?: {
+        scopes?: ReadonlyArray<{ allowed_actions?: unknown }>;
+        identity?: unknown;
+      };
     };
+
     const clauses = claims.scope?.scopes;
-    if (!Array.isArray(clauses)) {
-      decodedByToken.set(token, empty);
-      return empty;
-    }
-    const actions = new Set<string>();
-    for (const clause of clauses) {
-      const list = clause?.allowed_actions;
-      if (Array.isArray(list)) {
-        for (const a of list) if (typeof a === 'string') actions.add(a);
+    let allowedActions = EMPTY_ACTIONS;
+    if (Array.isArray(clauses)) {
+      const actions = new Set<string>();
+      for (const clause of clauses) {
+        const list = clause?.allowed_actions;
+        if (Array.isArray(list)) {
+          for (const a of list) if (typeof a === 'string') actions.add(a);
+        }
       }
+      allowedActions = [...actions];
     }
-    const result: ReadonlyArray<string> = [...actions];
-    decodedByToken.set(token, result);
-    return result;
+
+    // `scope.identity` — the ownership dimensions THIS session's own
+    // credential holds (canonical `scope:<ns>` keys, e.g. `scope:org`; plus
+    // `partnerUserId` when the token is bound to a specific user). Omitted
+    // entirely on the wire for a credential with none (an OWNER session) —
+    // never present as an empty object, but we treat both the same way here.
+    const rawIdentity = claims.scope?.identity;
+    let identity = EMPTY_IDENTITY;
+    if (rawIdentity != null && typeof rawIdentity === 'object' && !Array.isArray(rawIdentity)) {
+      const result: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawIdentity as Record<string, unknown>)) {
+        if (typeof v === 'string') result[k] = v;
+      }
+      identity = result;
+    }
+
+    const decoded: DecodedScopeClaims = { allowedActions, identity };
+    decodedByToken.set(token, decoded);
+    return decoded;
   } catch {
-    decodedByToken.set(token, empty);
-    return empty;
+    decodedByToken.set(token, EMPTY_CLAIMS);
+    return EMPTY_CLAIMS;
   }
+}
+
+/**
+ * Decode an st_*-shaped JWT and extract the union of allowed actions across
+ * its scope clauses (`scope.scopes[].allowed_actions`). An owner's token is a
+ * single clause `["*"]`; a scoped user's clauses carry their profile's
+ * specific actions. We union the actions across every clause.
+ *
+ * **No signature verification** — see {@link decodeIdentity}'s doc for why
+ * that's safe here.
+ */
+export function decodeAllowedActions(token: string): ReadonlyArray<string> {
+  return decodeScopeClaims(token).allowedActions;
+}
+
+/**
+ * Decode an st_*-shaped JWT and extract the `scope.identity` claim — the
+ * ownership dimensions (canonical `scope:<ns>` keys) THIS session's own
+ * credential holds, if any. Empty object for a credential with none (an
+ * OWNER session is never bound to a specific identity; the claim is omitted
+ * from the token entirely in that case).
+ *
+ * This is NOT the same question as `can(action)` — holding an identity value
+ * doesn't grant an action, and holding an action doesn't confer an identity.
+ * It answers a narrower question some surfaces need: "does this session's own
+ * credential hold an identity value it could legitimately confer onto
+ * something else?" (see the platform's identity-conferral rule — a caller may
+ * grant exactly the identity value it itself holds, never an arbitrary one).
+ *
+ * **No signature verification.** The backend re-verifies on every request,
+ * and reading this client-side is a UX optimization only, same as
+ * `decodeAllowedActions` — forged claims could only make the UI wrongly show
+ * an affordance that then fails server-side, never grant anything.
+ */
+export function decodeIdentity(token: string): Readonly<Record<string, string>> {
+  return decodeScopeClaims(token).identity;
 }
 
 /**
@@ -135,41 +274,40 @@ export function decodeAllowedActions(token: string): ReadonlyArray<string> {
 export function useScopeGate(tenantOverride?: TenantId): ScopeGateValue {
   const { tenant } = useCurrentTenant();
   const tenantId = tenantOverride ?? tenant;
-  const [actions, setActions] = useState<ReadonlyArray<string> | null>(null);
+  const [decoded, setDecoded] = useState<DecodedScopeClaims | null>(null);
 
   useEffect(() => {
     // No active tenant yet (memberships still loading) — stay in the loading
     // state; the effect re-runs once a tenant resolves.
     if (tenantId == null) return;
     let cancelled = false;
-    // Reset to loading on a tenant change so `can()` doesn't report the PRIOR
-    // tenant's actions during the re-mint — otherwise a scoped user switching
-    // tenants briefly gates routes on the old tenant's scope.
-    setActions(null);
+    // Reset to loading on a tenant change so `can()`/`identity` don't report
+    // the PRIOR tenant's claims during the re-mint — otherwise a scoped user
+    // switching tenants briefly gates routes on the old tenant's scope.
+    setDecoded(null);
     getVectrosApiToken(tenantId)
       .then((token) => {
-        if (!cancelled) setActions(decodeAllowedActions(token));
+        if (!cancelled) setDecoded(decodeScopeClaims(token));
       })
       .catch(() => {
         // Mint failure (network, expired session, etc.) → treat as no
-        // actions allowed. The UI hides everything until the user retries
+        // actions/identity. The UI hides everything until the user retries
         // or signs out + back in. Clean degraded mode.
-        if (!cancelled) setActions([]);
+        if (!cancelled) setDecoded(EMPTY_CLAIMS);
       });
     return (): void => {
       cancelled = true;
     };
   }, [tenantId]);
 
-  const allowed = actions ?? [];
-  const can = (action: string): boolean => {
-    if (allowed.includes('*')) return true;
-    return allowed.includes(action);
-  };
+  const allowed = decoded?.allowedActions ?? EMPTY_ACTIONS;
+  const identity = decoded?.identity ?? EMPTY_IDENTITY;
+  const can = (action: string): boolean => canPerform(allowed, action);
 
   return {
-    loading: actions === null,
+    loading: decoded === null,
     allowedActions: allowed,
+    identity,
     can,
   };
 }
