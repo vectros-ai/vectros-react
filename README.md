@@ -7,10 +7,13 @@ The shared React toolkit behind the Vectros reference apps — **admin-app** (co
 plane) and **app.vectros.ai** (data plane). It packages the parts both apps need to
 look and behave the same without copy-paste:
 
-- **Provider-agnostic auth** — an `AuthProviderAdapter` interface plus a
-  `CognitoAuthProvider` reference implementation (sign-in/up, password reset,
-  multi-membership, and TOTP MFA). Swap Cognito for Auth0/Clerk/OIDC by
-  implementing the adapter; nothing else changes.
+- **Provider-agnostic auth** — a minimal `AuthProviderAdapter` core plus purpose-named extension
+  interfaces a provider implements only where they genuinely apply: `EmbeddedCredentialAuth`
+  (sign-in/up, password reset, TOTP MFA — driven by the app itself) for a provider like Cognito, or
+  `HostedRedirectAuth` for a provider whose own hosted page owns the whole ceremony. Ships two
+  reference implementations: `CognitoAuthProvider` (embedded) and `Auth0AuthProvider` (Auth0
+  Universal Login, hosted-redirect). Write your own by implementing the interfaces that fit your
+  provider's actual integration mode — see each interface's doc comment for which is which.
 - **Vectros API token cache** — short-lived `st_*` bearers minted on demand and
   cached per `(tenant, context)`, with concurrent-mint coalescing and a
   clear-during-mint race guard. The mint function is **injected**, so the
@@ -32,6 +35,17 @@ This is a toolkit for an existing app, so it expects a set of peer
 dependencies the app already provides (React, MUI, TanStack Query, the
 Vectros SDK, and more) — see [Peer dependencies](#peer-dependencies) below.
 
+**`CognitoAuthProvider` and `Auth0AuthProvider` are each their own subpath
+import, not part of the main barrel** — only their *types* are exported from
+`@vectros-ai/react` itself, so each SDK's runtime only enters your bundle
+when you actually import that provider:
+
+```ts
+import { AuthProvider, CurrentTenantProvider } from '@vectros-ai/react';
+import { CognitoAuthProvider } from '@vectros-ai/react/providers/cognito';
+// or: import { Auth0AuthProvider } from '@vectros-ai/react/providers/auth0';
+```
+
 ## Status
 
 Pre-1.0. The API may change between minor versions until the first stable release.
@@ -39,9 +53,12 @@ Pre-1.0. The API may change between minor versions until the first stable releas
 ## Peer dependencies
 
 The consuming app supplies React 19, MUI 7, Emotion, TanStack Query 5, react-intl,
-react-router 7, `aws-amplify`, and `@vectros-ai/sdk` (all `peerDependencies`). The
-small leaf utilities (`jose`, `qrcode.react`, `@zxcvbn-ts/*`) ship as regular
-dependencies.
+react-router 7, and `@vectros-ai/sdk` (all required `peerDependencies`). `aws-amplify`
+and `@auth0/auth0-spa-js` are **optional** peer dependencies — install whichever
+matches the provider you actually use (`CognitoAuthProvider` needs `aws-amplify`;
+`Auth0AuthProvider` needs `@auth0/auth0-spa-js`); neither is required if you write
+your own adapter against a different provider. The small leaf utilities (`jose`,
+`qrcode.react`, `@zxcvbn-ts/*`) ship as regular dependencies.
 
 ## Security & trust
 

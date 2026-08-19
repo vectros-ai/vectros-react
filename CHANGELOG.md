@@ -3,6 +3,69 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.8.0 — 2026-08-19
+
+### Added
+
+- **`Auth0AuthProvider`** — a second `AuthProviderAdapter` reference implementation, backed by Auth0
+  Universal Login (`@auth0/auth0-spa-js`, now an optional peer dependency). Implements the core
+  adapter plus the new `HostedRedirectAuth` interface (`signInWithRedirect`/`handleRedirectCallback`)
+  — Auth0's hosted pages own the entire sign-in/signup/password/MFA ceremony under Universal Login, so
+  this provider deliberately does not implement `EmbeddedCredentialAuth` or `VectrosTenancyProvider`
+  (see below). Also exposes `exchangeToken`/`mintPartnerApiToken`, wiring the RFC 8693 token-exchange
+  endpoint as the app's `PartnerApiTokenMinter`, the same seam `CognitoAuthProvider.mintPartnerApiToken`
+  already uses.
+
+### Changed — breaking
+
+- **`AuthProviderAdapter` is now the minimal core (`getCurrentUser`/`signOut`/`getIdToken`) every
+  provider implements unconditionally.** The rest of the old, single 22-method interface is split
+  across three new, purpose-named interfaces along two independent axes, not left as one flat pile of
+  optional methods:
+  - **`EmbeddedCredentialAuth`** — `signIn`/`confirmSignIn`/`signUp`/`confirmSignUp`/`resendSignUpCode`/
+    `forgotPassword`/`confirmForgotPassword`/`changePassword`/`getMfaStatus`/`setUpTotp`/
+    `verifyTotpSetup`/`disableTotp`. A provider implements this only when it lets the app drive the
+    whole credential ceremony itself — `CognitoAuthProvider` still does, in full.
+  - **`HostedRedirectAuth`** (new) — `signInWithRedirect`/`handleRedirectCallback`, for providers whose
+    own hosted page owns the ceremony end to end.
+  - **`VectrosTenancyProvider`** — `getMemberships`/`getActiveTenant`/`getActivePartnerUserId`/
+    `setActiveTenant`/`checkUserExists`/`linkInvitation`/`listAppContexts`. Vectros's own multi-tenant
+    developer-portal model — structurally inapplicable to any token-exchange-based provider (one
+    registered issuer pins exactly one tenant, permanently), so it's no longer part of the generic,
+    provider-agnostic contract at all.
+
+  `useAuth()`'s `AuthContextValue` mirrors this: every `EmbeddedCredentialAuth`/`HostedRedirectAuth`
+  method is now **optional**, present only when the concrete provider implements it (`<AuthProvider>`
+  detects this at construction). The multi-tenancy methods are **removed from `useAuth()` entirely** —
+  `CurrentTenantProvider` now takes the tenancy-capable provider as an explicit new `tenancyProvider`
+  prop instead, and itself exposes `getActivePartnerUserId`/`listAppContexts`/`checkUserExists`/
+  `linkInvitation` via `useCurrentTenant()` for descendants that need them (e.g. a data-plane context
+  switcher) without going through `useAuth()`.
+
+  **Migration for an existing Cognito-only consumer:** pass the same adapter instance to both
+  `<AuthProvider provider={cognitoProvider}>` and `<CurrentTenantProvider tenancyProvider={cognitoProvider}>`.
+  If your app always uses one provider shape, narrow `useAuth()`'s return type once in your own local
+  wrapper — using the new exported `assertEmbeddedAuth`/`assertHostedAuth` type-assertion functions,
+  which back the narrowing with a real runtime check rather than a bare cast, so a future provider swap
+  fails loudly at the first `useAuth()` call instead of compiling clean and throwing deep inside some
+  page (see `admin-app`'s `src/auth/index.ts` for the pattern) — rather than optional-chaining every
+  call site.
+
+- **`aws-amplify` is now an optional peer dependency** (was required) — an Auth0-only consumer no
+  longer needs to install it. `@auth0/auth0-spa-js` is added as a second optional peer dependency,
+  needed only by consumers constructing `Auth0AuthProvider`.
+
+### Changed
+
+- Updated the `@vectros-ai/sdk` version the toolkit is built and tested against to **0.40.0**. No
+  functional changes; the peer-dependency range (`>=0.9.0`) is unchanged.
+- **`Auth0AuthProvider.exchangeToken`/`mintPartnerApiToken` now forward an optional `contextId`** on
+  `POST /v1/auth/token/exchange` as `context_id`. Relevant only when your registered issuer serves more
+  than one app context (each via its own `POST /v1/auth/issuers` row and audience) — omit it when your
+  issuer serves exactly one, the common case, unaffected by this addition. `mintPartnerApiToken` already
+  accepted a `contextId` argument per the shared `PartnerApiTokenMinter` signature; it previously
+  discarded it, now it's forwarded.
+
 ## 0.7.0 — 2026-08-05
 
 ### Changed

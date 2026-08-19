@@ -1,6 +1,6 @@
 {
   "name": "@vectros-ai/react",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Vectros React toolkit — the auth stack, Vectros API token cache, MFA, and UI primitives shared by the Vectros reference apps (admin-app, app.vectros.ai). Provider-agnostic by design: swap Cognito for Auth0/Clerk/OIDC behind a single adapter.",
   "license": "Apache-2.0",
   "repository": {
@@ -19,6 +19,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./providers/cognito": {
+      "types": "./dist/auth/providers/cognito.d.ts",
+      "import": "./dist/auth/providers/cognito.mjs",
+      "require": "./dist/auth/providers/cognito.js"
+    },
+    "./providers/auth0": {
+      "types": "./dist/auth/providers/auth0.d.ts",
+      "import": "./dist/auth/providers/auth0.mjs",
+      "require": "./dist/auth/providers/auth0.js"
     }
   },
   "files": [
@@ -48,6 +58,7 @@
     "reference-app"
   ],
   "peerDependencies": {
+    "@auth0/auth0-spa-js": ">=2.1",
     "@emotion/react": ">=11.14",
     "@emotion/styled": ">=11.14",
     "@mui/icons-material": ">=7",
@@ -60,6 +71,14 @@
     "react-intl": ">=10",
     "react-router": ">=7"
   },
+  "peerDependenciesMeta": {
+    "@auth0/auth0-spa-js": {
+      "optional": true
+    },
+    "aws-amplify": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "@zxcvbn-ts/core": "^3.0.4",
     "@zxcvbn-ts/language-common": "^3.0.4",
@@ -68,6 +87,7 @@
     "qrcode.react": "^4.2.0"
   },
   "devDependencies": {
+    "@auth0/auth0-spa-js": "2.24.1",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.11",
@@ -78,7 +98,7 @@
     "@testing-library/user-event": "14.5.2",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
-    "@vectros-ai/sdk": "0.38.0-staging.e1dd7f44",
+    "@vectros-ai/sdk": "0.40.0-staging.c999854d",
     "aws-amplify": "6.16.3",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",

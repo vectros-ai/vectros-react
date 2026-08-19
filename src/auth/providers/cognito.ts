@@ -57,6 +57,7 @@ import type {
   ConfirmForgotPasswordInput,
   ConfirmSignInInput,
   ConfirmSignUpInput,
+  EmbeddedCredentialAuth,
   ForgotPasswordInput,
   MfaMethod,
   MfaStatus,
@@ -69,6 +70,7 @@ import type {
   TenantMembership,
   TotpSetupDetails,
   UserExistsResult,
+  VectrosTenancyProvider,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -218,8 +220,14 @@ export interface CognitoAuthProviderConfig {
 
 /**
  * Concrete AuthProviderAdapter backed by AWS Cognito via aws-amplify v6.
+ * Implements the full embedded-credential auth surface (Cognito has no
+ * hosted-redirect option this reference impl uses) PLUS Vectros's own
+ * multi-tenant developer-portal model — see `types.ts`'s file-header note on
+ * why those are separate interfaces rather than one flat contract.
  */
-export class CognitoAuthProvider implements AuthProviderAdapter {
+export class CognitoAuthProvider
+  implements AuthProviderAdapter, EmbeddedCredentialAuth, VectrosTenancyProvider
+{
   /**
    * Deployment-specific configuration injected by the host app — see
    * {@link CognitoAuthProviderConfig}. To swap Cognito for another provider in a

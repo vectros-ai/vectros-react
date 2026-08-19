@@ -13,7 +13,9 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import type { ReactNode } from 'react';
 
 import { AuthProvider, CurrentTenantProvider, useScopeGate } from '../auth';
-import type { AuthProviderAdapter, AuthUser, TenantMembership } from '../auth';
+import type { AuthUser, TenantMembership } from '../auth';
+import { makeMockAuthProvider as mockAdapter } from '../test/mockAuthProvider';
+import type { FullMockProvider } from '../test/mockAuthProvider';
 import { AppLayout } from './AppLayout';
 import type { NavItemSpec } from './AppLayout';
 import { TestIntlProvider } from '../test/intl';
@@ -71,33 +73,6 @@ beforeEach(() => {
   vi.mocked(useScopeGate).mockReturnValue(wildcardGate);
 });
 
-function mockAdapter(overrides: Partial<AuthProviderAdapter> = {}): AuthProviderAdapter {
-  return {
-    getCurrentUser: vi.fn().mockResolvedValue(null),
-    signIn: vi.fn(),
-    confirmSignIn: vi.fn(),
-    signUp: vi.fn(),
-    confirmSignUp: vi.fn(),
-    resendSignUpCode: vi.fn(),
-    forgotPassword: vi.fn(),
-    confirmForgotPassword: vi.fn(),
-    changePassword: vi.fn(),
-    signOut: vi.fn().mockResolvedValue(undefined),
-    getIdToken: vi.fn(),
-    getMemberships: vi.fn().mockResolvedValue([]),
-    getActiveTenant: vi.fn().mockResolvedValue(null),
-    getActivePartnerUserId: vi.fn().mockResolvedValue(null),
-    setActiveTenant: vi.fn().mockResolvedValue(undefined),
-    checkUserExists: vi.fn().mockResolvedValue({ exists: false, isMe: false }),
-    linkInvitation: vi.fn().mockResolvedValue({ tenantId: '', partnerUserId: '', role: 'SUB_USER', alreadyActive: false }),
-    getMfaStatus: vi.fn().mockResolvedValue({ enabled: [], preferred: null }),
-    setUpTotp: vi.fn().mockResolvedValue({ secret: 'MOCKSECRET234567', otpauthUri: 'otpauth://totp/Mock:me?secret=MOCKSECRET234567&issuer=Mock' }),
-    verifyTotpSetup: vi.fn().mockResolvedValue(undefined),
-    disableTotp: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
 const aliceUser: AuthUser = {
   sub: 'sub-1',
   email: 'alice@example.com',
@@ -106,7 +81,7 @@ const aliceUser: AuthUser = {
 };
 
 function renderLayout(
-  provider: AuthProviderAdapter,
+  provider: FullMockProvider,
   initialPath = '/',
   extraProps: { brandLogoSrc?: string; brandQualifier?: string } = {},
 ) {

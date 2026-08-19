@@ -15,70 +15,65 @@ import type {
   ChangePasswordInput,
   ConfirmForgotPasswordInput,
   ConfirmSignInInput,
-  AppContextSummary,
-  ListAppContextsOptions,
   ConfirmSignUpInput,
   ForgotPasswordInput,
   MfaStatus,
   SignInInput,
   SignInResult,
-  LinkInvitationResult,
   SignUpInput,
   SignUpResult,
-  TenantId,
-  TenantMembership,
   TotpSetupDetails,
-  UserExistsResult,
 } from './types';
 
 /**
- * The value exposed by useAuth(). All operations are provider-agnostic and
- * mirror the AuthProviderAdapter contract one-for-one, with two additions:
- *   - `loading` — true during the initial getCurrentUser() probe.
- *   - `isAuthenticated` — convenience derived from `user`.
+ * The value exposed by useAuth(). Provider-agnostic core is always present;
+ * embedded-credential and hosted-redirect methods are each present ONLY when
+ * the concrete provider passed to `<AuthProvider>` actually implements that
+ * interface (see `types.ts`'s file-header note on why the split exists) —
+ * `<AuthProvider>` detects this at construction and omits the whole group
+ * otherwise, rather than expose a method that would always throw.
  *
- * Operations that change session state (signIn/confirmSignIn/signOut) re-fetch
- * the user via the adapter and update local state. Operations that don't
- * change session state (signUp/forgotPassword/etc.) pass through unchanged.
+ * Multi-tenancy (`getMemberships`/etc.) is deliberately NOT here at all —
+ * it's Vectros's own Cognito-backed model, structurally inapplicable to any
+ * BYO-IdP/token-exchange provider. Consumers that need it
+ * (`CurrentTenantProvider`) take a `VectrosTenancyProvider` as an explicit
+ * prop instead. See `types.ts`'s `VectrosTenancyProvider` doc.
+ *
+ * A consuming app that always uses one provider (e.g. admin-app is always
+ * Cognito/embedded) can narrow this once, in its own `useAuth()` wrapper —
+ * see `ui/admin-app/src/auth/index.ts` — so its many call sites keep calling
+ * `useAuth().signIn(...)` unchanged, fully typed, with no per-call-site
+ * optional-chaining.
  */
 export interface AuthContextValue {
   readonly user: AuthUser | null;
   readonly loading: boolean;
   readonly isAuthenticated: boolean;
-  readonly signIn: (input: SignInInput) => Promise<SignInResult>;
-  readonly confirmSignIn: (input: ConfirmSignInInput) => Promise<SignInResult>;
-  readonly signUp: (input: SignUpInput) => Promise<SignUpResult>;
-  readonly confirmSignUp: (input: ConfirmSignUpInput) => Promise<void>;
-  readonly resendSignUpCode: (input: { readonly email: string }) => Promise<void>;
-  readonly forgotPassword: (input: ForgotPasswordInput) => Promise<void>;
-  readonly confirmForgotPassword: (input: ConfirmForgotPasswordInput) => Promise<void>;
-  readonly changePassword: (input: ChangePasswordInput) => Promise<void>;
   readonly signOut: () => Promise<void>;
   readonly getIdToken: () => Promise<string | null>;
-  // Multi-tenancy — pass-through to the adapter so consumers
-  // (TenantSwitcher, useCurrentTenant) stay provider-agnostic.
-  readonly getMemberships: () => Promise<ReadonlyArray<TenantMembership>>;
-  readonly getActiveTenant: () => Promise<TenantId | null>;
-  readonly getActivePartnerUserId: () => Promise<string | null>;
-  readonly setActiveTenant: (tenantId: TenantId) => Promise<void>;
-  readonly checkUserExists: (email: string) => Promise<UserExistsResult>;
-  readonly linkInvitation: (inviteToken: string) => Promise<LinkInvitationResult>;
-  /**
-   * List the reachable AppContexts in a tenant (data-plane context switcher).
-   * Always present here even though the adapter method is optional — AuthProvider
-   * supplies a `[]` fallback when the adapter omits it, so consumers needn't
-   * null-check.
-   */
-  readonly listAppContexts: (
-    tenantId: TenantId,
-    options?: ListAppContextsOptions,
-  ) => Promise<ReadonlyArray<AppContextSummary>>;
-  // Multi-factor auth — pass-through to the adapter so the /account
-  // page + enrollment wizard stay provider-agnostic.
-  readonly getMfaStatus: () => Promise<MfaStatus>;
-  readonly setUpTotp: () => Promise<TotpSetupDetails>;
-  readonly verifyTotpSetup: (code: string) => Promise<void>;
-  readonly disableTotp: () => Promise<void>;
+
+  // Embedded-credential methods — present only for an embedded-mode provider
+  // (e.g. CognitoAuthProvider). signIn/confirmSignIn re-fetch the user via
+  // the adapter and update local state on COMPLETE; the rest pass through
+  // unchanged (they don't themselves change session state).
+  readonly signIn?: (input: SignInInput) => Promise<SignInResult>;
+  readonly confirmSignIn?: (input: ConfirmSignInInput) => Promise<SignInResult>;
+  readonly signUp?: (input: SignUpInput) => Promise<SignUpResult>;
+  readonly confirmSignUp?: (input: ConfirmSignUpInput) => Promise<void>;
+  readonly resendSignUpCode?: (input: { readonly email: string }) => Promise<void>;
+  readonly forgotPassword?: (input: ForgotPasswordInput) => Promise<void>;
+  readonly confirmForgotPassword?: (input: ConfirmForgotPasswordInput) => Promise<void>;
+  readonly changePassword?: (input: ChangePasswordInput) => Promise<void>;
+  readonly getMfaStatus?: () => Promise<MfaStatus>;
+  readonly setUpTotp?: () => Promise<TotpSetupDetails>;
+  readonly verifyTotpSetup?: (code: string) => Promise<void>;
+  readonly disableTotp?: () => Promise<void>;
+
+  // Hosted-redirect methods — present only for a hosted-redirect provider
+  // (e.g. an Auth0-via-Universal-Login adapter). handleRedirectCallback
+  // re-fetches the user via the adapter on success, same as signIn above.
+  readonly signInWithRedirect?: (options?: { readonly returnTo?: string }) => Promise<void>;
+  readonly handleRedirectCallback?: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

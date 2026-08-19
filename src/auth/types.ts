@@ -77,7 +77,7 @@ export type TenantId = string;
 
 /**
  * A tenant the signed-in user is a member of. Returned by
- * {@link AuthProviderAdapter.getMemberships}. The TenantSwitcher renders one
+ * {@link VectrosTenancyProvider.getMemberships}. The TenantSwitcher renders one
  * entry per membership; pages scope their data reads to the active one.
  *
  * Field shape mirrors the `GET /developer/memberships` response one-to-one
@@ -211,9 +211,8 @@ export interface ChangePasswordInput {
 }
 
 /**
- * The contract every authentication provider must satisfy.
- *
- * Implementation rules for concrete providers:
+ * Shared implementation rules for EVERY interface below (core, embedded,
+ * hosted-redirect, tenancy alike):
  *   - Email addresses are lower-cased before being passed to the underlying
  *     provider (case-folding is the caller's responsibility on input, but
  *     the adapter MUST not require the caller to pre-lowercase).
@@ -227,6 +226,42 @@ export interface ChangePasswordInput {
  *     pages pattern-match only on `error.code`, never on provider-specific
  *     `error.name`. The adapter MUST not swallow errors.
  *   - All methods are async and idempotent where the underlying API allows.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY FOUR INTERFACES, NOT ONE — read this before adding a method to any of them.
+ *
+ * A provider's real capabilities split along two INDEPENDENT axes, not one
+ * pile of "sometimes optional" methods:
+ *
+ *   1. Integration MODE — does the provider let the app drive the sign-in/
+ *      signup/password/MFA ceremony (EmbeddedCredentialAuth), or does a
+ *      provider-hosted page own the whole thing end to end
+ *      (HostedRedirectAuth)? This is a real, named choice every major IdP
+ *      (Cognito, Auth0, Okta) offers explicitly, and — critically — a
+ *      HOSTED-REDIRECT provider cannot honestly implement ANY
+ *      EmbeddedCredentialAuth method: signup, password reset, change-password,
+ *      and MFA (both at sign-in and self-service management) all happen on
+ *      the provider's own hosted pages under that mode, invisible to this
+ *      app. There is no meaningful "optional, might work" middle ground here.
+ *   2. Vectros's OWN multi-tenant developer-portal model
+ *      (VectrosTenancyProvider) — membership listing/switching and the
+ *      Cognito-shaped invite-linking dance. This is NOT an integration-mode
+ *      question at all; it's specific to Vectros's Cognito-backed dev portal.
+ *      A BYO-IdP fork using the token-exchange model
+ *      (`POST /v1/auth/token/exchange`) can NEVER implement this — the
+ *      exchange contract pins one registered issuer to exactly one
+ *      `{tenantId, contextId}`, permanently, so there is no second tenant to
+ *      discover or switch to. Not "unsupported yet" — structurally
+ *      inapplicable to any exchange-based provider, by design.
+ *
+ * Each concrete provider implements exactly the interfaces that genuinely
+ * apply — `CognitoAuthProvider implements AuthProviderAdapter,
+ * EmbeddedCredentialAuth, VectrosTenancyProvider`; a hosted-redirect Auth0
+ * provider implements `AuthProviderAdapter, HostedRedirectAuth` and nothing
+ * else. No stub-throws, no flat optional methods scattered across one
+ * 20+-method interface — a consumer that shouldn't call a method gets a
+ * compile error, not a documented runtime throw.
+ * ---------------------------------------------------------------------------
  */
 
 /**
@@ -243,7 +278,7 @@ export interface AppContextSummary {
   readonly status?: string;
 }
 
-/** Options for {@link AuthProviderAdapter.listAppContexts}. */
+/** Options for {@link VectrosTenancyProvider.listAppContexts}. */
 export interface ListAppContextsOptions {
   /**
    * When true, return only the contexts the caller is actually provisioned in
@@ -254,6 +289,17 @@ export interface ListAppContextsOptions {
   readonly onlyMine?: boolean;
 }
 
+/**
+ * The CORE contract — every provider, hosted or embedded, implements this and
+ * only this unconditionally. Sign-in itself is deliberately NOT here: an
+ * embedded provider's sign-in takes credentials and resolves synchronously
+ * with a {@link SignInResult} (see {@link EmbeddedCredentialAuth.signIn}); a
+ * hosted-redirect provider's sign-in takes no credentials, navigates the
+ * whole page away, and can never resolve a result from the call that starts
+ * it (see {@link HostedRedirectAuth.signInWithRedirect}) — those are two
+ * genuinely different shapes, not one method two providers happen to
+ * implement differently.
+ */
 export interface AuthProviderAdapter {
   /**
    * Returns the currently-signed-in user, or null if no active session.
@@ -262,6 +308,31 @@ export interface AuthProviderAdapter {
    */
   getCurrentUser(): Promise<AuthUser | null>;
 
+  /**
+   * Signs the user out. Implementations SHOULD perform a global sign-out
+   * (invalidate refresh tokens) when the underlying provider supports it,
+   * to defend against stolen-refresh-token replay.
+   */
+  signOut(): Promise<void>;
+
+  /**
+   * Returns the current bearer token to attach to authenticated API calls,
+   * or null if no active session. For OIDC providers this is the id_token;
+   * for opaque-token providers this is whatever the API expects.
+   */
+  getIdToken(): Promise<string | null>;
+}
+
+/**
+ * Embedded/credential-driven auth methods — sign-in, signup, password reset,
+ * change-password, and BOTH MFA facets (challenge-at-sign-in via
+ * {@link confirmSignIn} and self-service enrollment/management), all driven
+ * synchronously by THIS app against the provider's SDK/API. A provider only
+ * implements this when it genuinely lets an app build its own UI for all of
+ * it — see the file-header note on why this can't be partial per method.
+ * `CognitoAuthProvider` implements this in full.
+ */
+export interface EmbeddedCredentialAuth {
   signIn(input: SignInInput): Promise<SignInResult>;
 
   /**
@@ -284,25 +355,78 @@ export interface AuthProviderAdapter {
   changePassword(input: ChangePasswordInput): Promise<void>;
 
   /**
-   * Signs the user out. Implementations SHOULD perform a global sign-out
-   * (invalidate refresh tokens) when the underlying provider supports it,
-   * to defend against stolen-refresh-token replay.
+   * The user's current MFA configuration. MUST NOT throw on "no MFA enrolled"
+   * — return `{ enabled: [], preferred: null }`.
    */
-  signOut(): Promise<void>;
+  getMfaStatus(): Promise<MfaStatus>;
 
   /**
-   * Returns the current bearer token to attach to authenticated API calls,
-   * or null if no active session. For OIDC providers this is the id_token;
-   * for opaque-token providers this is whatever the API expects.
+   * Begin TOTP enrollment: provision a new (unconfirmed) authenticator secret
+   * and return the QR/manual-entry details. Does NOT enable MFA — the user
+   * must prove possession via {@link verifyTotpSetup} first.
    */
-  getIdToken(): Promise<string | null>;
+  setUpTotp(): Promise<TotpSetupDetails>;
 
-  // -------------------------------------------------------------------------
-  // Multi-tenancy. Lifted into the adapter so partner forks
-  // running their own IdP wire their equivalent mechanism once and the
-  // TenantSwitcher UI "just works".
-  // -------------------------------------------------------------------------
+  /**
+   * Confirm TOTP enrollment with a code from the user's authenticator app, then
+   * make TOTP the preferred method. Throws on an incorrect/expired code.
+   */
+  verifyTotpSetup(code: string): Promise<void>;
 
+  /** Disable TOTP for the current user. Idempotent. */
+  disableTotp(): Promise<void>;
+}
+
+/**
+ * Hosted-redirect auth methods — a provider-hosted page owns the entire
+ * sign-in/signup/password/MFA ceremony; this app only kicks the redirect off
+ * and picks up the result afterward. `signIn` doesn't exist in this shape:
+ * there is nothing to await a `SignInResult` from — the browser navigates
+ * away mid-call. A Universal-Login-style Auth0 provider implements this
+ * instead of {@link EmbeddedCredentialAuth}.
+ */
+export interface HostedRedirectAuth {
+  /**
+   * Kick off the provider's hosted sign-in page — a full top-level navigation
+   * away from this app. Resolves (if at all) right before the browser
+   * unloads; the actual outcome is observed later via
+   * {@link handleRedirectCallback} on the return trip, not from this call's
+   * own promise. `options.returnTo` is carried through opaquely (e.g. Auth0's
+   * `appState`) and should be read back out by the caller (via its own
+   * storage, not this interface) if it needs to restore the pre-redirect
+   * location. SECURITY: nothing in this package validates `returnTo` — a
+   * future caller that reads it back out MUST confirm it's a same-origin,
+   * relative path before navigating to it (an unsanitized read-and-navigate
+   * is an open redirect).
+   */
+  signInWithRedirect(options?: { readonly returnTo?: string }): Promise<void>;
+
+  /**
+   * Called once, from the app's redirect-callback route, after the provider
+   * has navigated the user back with an authorization result in the URL.
+   * Completes the code exchange and establishes the session; the caller
+   * should follow up with {@link AuthProviderAdapter.getCurrentUser} (the
+   * `<AuthProvider>` wiring does this automatically) rather than expect a
+   * `SignInResult` back from here — there is no mid-flow challenge state to
+   * report under this mode, only "did a session end up established."
+   * Throws on a failed/cancelled/denied redirect.
+   */
+  handleRedirectCallback(): Promise<void>;
+}
+
+/**
+ * Vectros's own multi-tenant developer-portal model — membership
+ * listing/switching, app-context enumeration, and the Cognito-shaped
+ * invite-linking dance. NOT an integration-mode concern (see the file-header
+ * note): a BYO-IdP fork using the token-exchange model can never implement
+ * this at all, because the exchange contract pins one registered issuer to
+ * exactly one `{tenantId, contextId}` permanently — there is no second tenant
+ * to discover or switch to, ever, for any exchange-based provider. Only
+ * `CognitoAuthProvider` implements this; consumers that need it
+ * (`CurrentTenantProvider`) take it as an explicit prop, not through the
+ * generic `useAuth()` surface.
+ */
+export interface VectrosTenancyProvider {
   /**
    * All tenant memberships the current user has. Returns an empty array when
    * the user has none (or no active session). MUST NOT throw on "no session".
@@ -331,8 +455,7 @@ export interface AuthProviderAdapter {
    * (e.g. `usr_<id>`) without knowing the IdP.
    *
    * Used by the data-plane context switcher to enumerate the AppContexts a
-   * SUB_USER can reach (`listProfilesForPrincipal`). Forks on a different IdP
-   * map their equivalent "active membership id" mechanism here.
+   * SUB_USER can reach (`listProfilesForPrincipal`).
    */
   getActivePartnerUserId(): Promise<string | null>;
 
@@ -365,46 +488,16 @@ export interface AuthProviderAdapter {
    * data-plane context switcher's OWNER enumeration. Returns an empty array
    * when there are none / no session; MUST NOT throw on "no session".
    *
-   * Optional: a provider that doesn't model app contexts (or a fork that hasn't
-   * wired it) can omit it, and the switcher degrades to no owner-listed
-   * contexts. The Cognito reference impl reads the OWNER-gated developer-API
-   * enumeration (a context-scoped data token deliberately cannot list sibling
-   * contexts, so this is NOT the partner data API). Like the other multi-tenancy
-   * methods, the `tenantId` is provider-agnostic — the impl maps it to its own
-   * backend (the Cognito impl resolves it to the tenant's live/test kind).
+   * Optional: even within this Cognito-shaped interface, a fork that hasn't
+   * wired app contexts can omit it, and the switcher degrades to no
+   * owner-listed contexts. The Cognito reference impl reads the OWNER-gated
+   * developer-API enumeration (a context-scoped data token deliberately
+   * cannot list sibling contexts, so this is NOT the partner data API). The
+   * `tenantId` is provider-agnostic — the impl maps it to its own backend
+   * (the Cognito impl resolves it to the tenant's live/test kind).
    */
   listAppContexts?(
     tenantId: TenantId,
     options?: ListAppContextsOptions,
   ): Promise<ReadonlyArray<AppContextSummary>>;
-
-  // -------------------------------------------------------------------------
-  // Multi-factor auth. TOTP only for now; the contract is method-
-  // agnostic so the SMS follow-up adds enrollment without changing the shape.
-  // Lifted into the adapter (like the multi-tenancy methods) so a partner fork
-  // running Auth0/Clerk/OIDC wires its own MFA mechanism once. Requires an
-  // active session.
-  // -------------------------------------------------------------------------
-
-  /**
-   * The user's current MFA configuration. MUST NOT throw on "no MFA enrolled"
-   * — return `{ enabled: [], preferred: null }`.
-   */
-  getMfaStatus(): Promise<MfaStatus>;
-
-  /**
-   * Begin TOTP enrollment: provision a new (unconfirmed) authenticator secret
-   * and return the QR/manual-entry details. Does NOT enable MFA — the user
-   * must prove possession via {@link verifyTotpSetup} first.
-   */
-  setUpTotp(): Promise<TotpSetupDetails>;
-
-  /**
-   * Confirm TOTP enrollment with a code from the user's authenticator app, then
-   * make TOTP the preferred method. Throws on an incorrect/expired code.
-   */
-  verifyTotpSetup(code: string): Promise<void>;
-
-  /** Disable TOTP for the current user. Idempotent. */
-  disableTotp(): Promise<void>;
 }

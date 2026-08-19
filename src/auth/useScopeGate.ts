@@ -98,7 +98,7 @@ function isOpsString(s: string): boolean {
  *   UNQUALIFIED ask — doing so would let a caller scoped to one record type or
  *   namespace appear to hold the resource generally. Whether a qualifier is actually
  *   meaningful for a given resource+op is a platform authorization-grammar question
- *   (`TokenScope`'s qualifiable-resource / sensitive-reveal axes) this client-side
+ *   (the qualifiable-resource / sensitive-reveal axes of the scope grammar) this client-side
  *   predicate does not attempt to replicate — the exact-match fallback is the
  *   conservative choice: never wider than what the caller can prove.
  */

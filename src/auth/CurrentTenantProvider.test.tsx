@@ -24,7 +24,9 @@ import { CurrentTenantProvider } from './CurrentTenantProvider';
 import { useCurrentTenant } from './useCurrentTenant';
 import { useAuth } from './useAuth';
 import { __resetVectrosApiTokenCacheForTest } from './vectrosApiTokenCache';
-import type { AuthProviderAdapter, AuthUser, TenantMembership } from './types';
+import type { AuthUser, TenantMembership } from './types';
+import { makeMockAuthProvider } from '../test/mockAuthProvider';
+import type { FullMockProvider } from '../test/mockAuthProvider';
 
 const ALICE: AuthUser = { sub: 'sub-alice', email: 'alice@example.com', firstName: 'Alice', lastName: 'Smith' };
 const BOB: AuthUser = { sub: 'sub-bob', email: 'bob@example.com', firstName: 'Bob', lastName: 'Jones' };
@@ -46,49 +48,19 @@ const GLOBEX: TenantMembership = {
   partnerId: 'p_globex',
 };
 
-/** Minimal AuthProviderAdapter test double — benign defaults; override per test. */
-function makeMockAuthProvider(overrides: Partial<AuthProviderAdapter> = {}): AuthProviderAdapter {
-  return {
-    getCurrentUser: vi.fn().mockResolvedValue(null),
-    signIn: vi.fn(),
-    confirmSignIn: vi.fn(),
-    signUp: vi.fn(),
-    confirmSignUp: vi.fn().mockResolvedValue(undefined),
-    resendSignUpCode: vi.fn().mockResolvedValue(undefined),
-    forgotPassword: vi.fn().mockResolvedValue(undefined),
-    confirmForgotPassword: vi.fn().mockResolvedValue(undefined),
-    changePassword: vi.fn().mockResolvedValue(undefined),
-    signOut: vi.fn().mockResolvedValue(undefined),
-    getIdToken: vi.fn().mockResolvedValue(null),
-    getMemberships: vi.fn().mockResolvedValue([]),
-    getActiveTenant: vi.fn().mockResolvedValue(null),
-    getActivePartnerUserId: vi.fn().mockResolvedValue(null),
-    setActiveTenant: vi.fn().mockResolvedValue(undefined),
-    checkUserExists: vi.fn().mockResolvedValue({ exists: false, isMe: false }),
-    linkInvitation: vi
-      .fn()
-      .mockResolvedValue({ tenantId: '', partnerUserId: '', role: 'SUB_USER', alreadyActive: false }),
-    getMfaStatus: vi.fn().mockResolvedValue({ enabled: [], preferred: null }),
-    setUpTotp: vi.fn().mockResolvedValue({ secret: 'MOCKSECRET234567', otpauthUri: 'otpauth://x' }),
-    verifyTotpSetup: vi.fn().mockResolvedValue(undefined),
-    disableTotp: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-function wrapper(adapter: AuthProviderAdapter) {
+function wrapper(adapter: FullMockProvider) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }): ReactElement => (
     <QueryClientProvider client={queryClient}>
       <AuthProvider provider={adapter}>
-        <CurrentTenantProvider>{children}</CurrentTenantProvider>
+        <CurrentTenantProvider tenancyProvider={adapter}>{children}</CurrentTenantProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
 }
 
 /** Read the provider + auth together so a test can drive sign-in/out and observe tenant state. */
-function renderProvider(adapter: AuthProviderAdapter) {
+function renderProvider(adapter: FullMockProvider) {
   return renderHook(() => ({ tenant: useCurrentTenant(), auth: useAuth() }), {
     wrapper: wrapper(adapter),
   });
@@ -120,7 +92,7 @@ describe('CurrentTenantProvider identity-driven load', () => {
     expect(result.current.tenant.tenant).toBeNull();
 
     await act(async () => {
-      await result.current.auth.signIn({ email: ALICE.email, password: 'pw' });
+      await result.current.auth.signIn!({ email: ALICE.email, password: 'pw' });
     });
 
     await waitFor(() => expect(result.current.tenant.tenant).toBe('tnt_acme'));
@@ -173,7 +145,7 @@ describe('CurrentTenantProvider identity-driven load', () => {
     await waitFor(() => expect(result.current.tenant.tenant).toBe('tnt_acme'));
 
     await act(async () => {
-      await result.current.auth.signIn({ email: BOB.email, password: 'pw' });
+      await result.current.auth.signIn!({ email: BOB.email, password: 'pw' });
     });
 
     await waitFor(() => expect(result.current.tenant.tenant).toBe('tnt_globex'));

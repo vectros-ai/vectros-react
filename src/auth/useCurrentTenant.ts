@@ -27,7 +27,14 @@
 
 import { createContext, useContext } from 'react';
 
-import type { TenantId, TenantMembership } from './types';
+import type {
+  AppContextSummary,
+  LinkInvitationResult,
+  ListAppContextsOptions,
+  TenantId,
+  TenantMembership,
+  UserExistsResult,
+} from './types';
 
 /** Re-export so consumers can `import { TenantMembership } from '../auth/...'`. */
 export type { TenantMembership } from './types';
@@ -47,6 +54,23 @@ export interface CurrentTenantContextValue {
   readonly loading: boolean;
   /** The membership matching `tenant` (kind/name/role/partnerId), or null. */
   readonly activeMembership: TenantMembership | null;
+  /**
+   * Pass-through to the injected `tenancyProvider`'s method of the same name
+   * (`[]`/`null`-safe when no tenancyProvider is wired) — surfaced here so
+   * descendants (e.g. app-vectros-ai's `CurrentContextProvider`) that sit
+   * below `CurrentTenantProvider` but need tenancy data don't have to thread
+   * the tenancy adapter as a second, separate prop of their own.
+   */
+  readonly getActivePartnerUserId: () => Promise<string | null>;
+  /** Pass-through to the injected `tenancyProvider`'s method of the same name. */
+  readonly listAppContexts: (
+    tenantId: TenantId,
+    options?: ListAppContextsOptions,
+  ) => Promise<ReadonlyArray<AppContextSummary>>;
+  /** Pass-through to the injected `tenancyProvider`'s method of the same name (AcceptPage's signUp-vs-link pivot). */
+  readonly checkUserExists: (email: string) => Promise<UserExistsResult>;
+  /** Pass-through to the injected `tenancyProvider`'s method of the same name (AcceptPage's auto-link branch). */
+  readonly linkInvitation: (inviteToken: string) => Promise<LinkInvitationResult>;
 }
 
 export const CurrentTenantContext = createContext<CurrentTenantContextValue | null>(null);
@@ -67,6 +91,14 @@ export function useCurrentTenant(): CurrentTenantContextValue {
     memberships: [],
     loading: false,
     activeMembership: null,
+    getActivePartnerUserId: async () => null,
+    listAppContexts: async () => [],
+    checkUserExists: async () => ({ exists: false, isMe: false }),
+    linkInvitation: async () => {
+      throw new Error(
+        'useCurrentTenant: linkInvitation called outside a CurrentTenantProvider (or one with no tenancyProvider).',
+      );
+    },
   };
 }
 
