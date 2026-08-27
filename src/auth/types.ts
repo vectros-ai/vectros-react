@@ -412,6 +412,28 @@ export interface HostedRedirectAuth {
    * Throws on a failed/cancelled/denied redirect.
    */
   handleRedirectCallback(): Promise<void>;
+
+  /**
+   * Bind a first-time signer to a PENDING invitation, completing a
+   * Shape-1/Captive-Enterprise onboarding (no self-signup — every identity,
+   * including the first admin, arrives via an invite). Call this ONCE, from
+   * the app's own accept-invite route, AFTER {@link handleRedirectCallback}
+   * has already established a real session for this call to present — the
+   * invite token alone proves nothing; it's the (now-authenticated) caller's
+   * verified email claim plus this token together that the platform's
+   * token-exchange endpoint binds.
+   *
+   * Deliberately returns `void`, not a token: this call's job is ONLY to
+   * perform the server-side bind (the caller's identity transitions from
+   * PENDING to ACTIVE). It does not populate this package's partner-API
+   * token cache — the next ordinary API call re-mints through the ordinary
+   * (invite-token-free) path, which now succeeds because the bind already
+   * happened. Throws on a bad/expired/already-used invite token, or an
+   * email mismatch between the invite and the identity that signed in —
+   * the platform's own uniform-not-found discipline collapses all of these
+   * to one generic rejection; do not attempt to distinguish them client-side.
+   */
+  acceptInvite(inviteToken: string): Promise<void>;
 }
 
 /**

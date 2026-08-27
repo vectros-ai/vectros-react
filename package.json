@@ -1,6 +1,6 @@
 {
   "name": "@vectros-ai/react",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Vectros React toolkit — the auth stack, Vectros API token cache, MFA, and UI primitives shared by the Vectros reference apps (admin-app, app.vectros.ai). Provider-agnostic by design: swap Cognito for Auth0/Clerk/OIDC behind a single adapter.",
   "license": "Apache-2.0",
   "repository": {
@@ -84,6 +84,7 @@
     "@zxcvbn-ts/language-common": "^3.0.4",
     "@zxcvbn-ts/language-en": "^3.0.2",
     "jose": "^5.10.0",
+    "pako": "^3.0.1",
     "qrcode.react": "^4.2.0"
   },
   "devDependencies": {
@@ -98,7 +99,7 @@
     "@testing-library/user-event": "14.5.2",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
-    "@vectros-ai/sdk": "0.40.0-staging.c999854d",
+    "@vectros-ai/sdk": "0.41.0-staging.433666ec",
     "aws-amplify": "6.16.3",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",

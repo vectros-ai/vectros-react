@@ -41,11 +41,25 @@ const NAV_ITEMS: ReadonlyArray<NavItemSpec> = [
 // real gate logic is covered by useScopeGate/ScopeGate's own suites). Each test
 // sets the hook's return to model effective scope (wildcard OWNER vs empty).
 const mockUseScopeGate = vi.hoisted(() => vi.fn());
+// Captures the tenantOverride each gated nav item's <ScopeGate> was rendered
+// with, so the "scopeGateTenant threads through" test can assert on it
+// without a real useScopeGate() mint-effect round trip.
+const scopeGateTenantOverrides = vi.hoisted((): string[] => []);
 vi.mock('../auth', async (importOriginal) => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- vitest's importOriginal idiom
   const actual = await importOriginal<typeof import('../auth')>();
-  const ScopeGate = ({ action, children }: { action?: string; children: ReactNode }): ReactNode =>
-    (mockUseScopeGate() as { can: (a?: string) => boolean }).can(action) ? children : null;
+  const ScopeGate = ({
+    action,
+    children,
+    tenantOverride,
+  }: {
+    action?: string;
+    children: ReactNode;
+    tenantOverride?: string;
+  }): ReactNode => {
+    scopeGateTenantOverrides.push(tenantOverride ?? '');
+    return (mockUseScopeGate() as { can: (a?: string) => boolean }).can(action) ? children : null;
+  };
   return { ...actual, useScopeGate: mockUseScopeGate, ScopeGate };
 });
 
@@ -83,7 +97,7 @@ const aliceUser: AuthUser = {
 function renderLayout(
   provider: FullMockProvider,
   initialPath = '/',
-  extraProps: { brandLogoSrc?: string; brandQualifier?: string } = {},
+  extraProps: { brandLogoSrc?: string; brandQualifier?: string; scopeGateTenant?: string } = {},
 ) {
   return render(
     <TestIntlProvider>
@@ -114,6 +128,7 @@ function renderLayout(
 
 afterEach(() => {
   vi.clearAllMocks();
+  scopeGateTenantOverrides.length = 0;
 });
 
 describe('AppLayout', () => {
@@ -293,6 +308,23 @@ describe('AppLayout', () => {
       expect(screen.queryByRole('link', { name: /members/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /scoped keys/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /^logs$/i })).not.toBeInTheDocument();
+    });
+
+    it('forwards scopeGateTenant to every gated nav item\'s <ScopeGate> — the single-tenant-host escape hatch', async () => {
+      vi.mocked(useScopeGate).mockReturnValue(wildcardGate);
+      const provider = mockAdapter({
+        getCurrentUser: vi.fn().mockResolvedValue(aliceUser),
+      });
+      renderLayout(provider, '/', { scopeGateTenant: 'exchange-resolved' });
+
+      await waitFor(() => {
+        expect(screen.queryAllByRole('link', { name: /members/i }).length).toBeGreaterThan(0);
+      });
+      // Every gated item (Members/Keys/Logs, rendered in both the permanent
+      // and mobile Drawers) got the same override — never an empty/omitted
+      // value while the prop was supplied.
+      expect(scopeGateTenantOverrides.length).toBeGreaterThan(0);
+      expect(scopeGateTenantOverrides.every((t) => t === 'exchange-resolved')).toBe(true);
     });
   });
 

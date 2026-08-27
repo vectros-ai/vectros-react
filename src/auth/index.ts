@@ -52,8 +52,13 @@ export {
   getVectrosApiToken,
   clearVectrosApiTokenCache,
   setPartnerApiTokenMinter,
+  setPartnerApiTokenAssumer,
 } from './vectrosApiTokenCache';
-export type { PartnerApiTokenMinter } from './vectrosApiTokenCache';
+export type {
+  PartnerApiTokenMinter,
+  PartnerApiTokenAssumer,
+  VectrosIdentityOverride,
+} from './vectrosApiTokenCache';
 
 // Test-only cache resets — exported so consuming apps' test suites can isolate
 // state between cases. Not part of the supported runtime API (the `__` prefix
@@ -62,6 +67,12 @@ export type { PartnerApiTokenMinter } from './vectrosApiTokenCache';
 // may move these behind a `@vectros-ai/react/test` subpath export.
 export { __resetVectrosApiTokenCacheForTest } from './vectrosApiTokenCache';
 export { __resetScopeGateDecodeCacheForTest } from './useScopeGate';
+// Mints a `scope` claim in the real wire shape (raw-DEFLATE-compressed against the
+// platform's preset dictionary) instead of a plain object a real backend never
+// sends — a consuming app's own test suite should build tokens with this, not a
+// flat/plain-object fixture, or its tests exercise only decodeScopeClaims's
+// defensive fallback and never the real compressed-decode path. See `scopeCompression.ts`.
+export { compressScopeClaim as __compressScopeClaimForTest } from './scopeCompression';
 
 export type {
   AppContextSummary,

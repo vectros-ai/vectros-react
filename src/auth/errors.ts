@@ -31,6 +31,17 @@ export type AuthErrorCode =
   | 'PASSWORD_POLICY_VIOLATION'
   | 'LIMIT_EXCEEDED'
   | 'NETWORK_ERROR'
+  /**
+   * The IdP rejected the login itself because the account's email isn't
+   * verified yet (a hosted-redirect-provider case — Auth0's standard
+   * behavior for a database connection with "Requires Email Verification"
+   * on: the login attempt right after signup fails with no token ever
+   * reaching this app). Deliberately separate from `USER_NOT_CONFIRMED`,
+   * which is Cognito-shaped ("enter the code we emailed you") — this one's
+   * remedy is "click the link in your email, then come back and sign in
+   * again," not a code-entry step.
+   */
+  | 'EMAIL_NOT_VERIFIED'
   | 'UNKNOWN';
 
 /**

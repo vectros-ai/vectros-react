@@ -19,6 +19,7 @@
 import type { ReactNode } from 'react';
 
 import { useScopeGate } from './useScopeGate';
+import type { TenantId } from './types';
 
 export interface ScopeGateProps {
   /**
@@ -31,14 +32,28 @@ export interface ScopeGateProps {
   readonly fallback?: ReactNode;
   /** Rendered when the gate allows access. */
   readonly children: ReactNode;
+  /**
+   * Forwarded to `useScopeGate` as its own `tenantOverride`. Omit in a
+   * multi-tenant host (the common case) — the gate reads the active tenant
+   * from `useCurrentTenant()`. A single-tenant host with no
+   * `CurrentTenantProvider` in its tree MUST supply this: `useCurrentTenant()`
+   * falls back to `tenant: null` with no provider, which leaves the
+   * underlying `useScopeGate()` call permanently `loading` (its mint effect
+   * never fires for a null tenant) — so this gate would hide `children`
+   * forever, not just until the token resolves. Pass a stable, app-wide
+   * constant (any non-empty string; a single-tenant exchange-based provider
+   * ignores the value itself, see `Auth0AuthProvider.mintPartnerApiToken`).
+   */
+  readonly tenantOverride?: TenantId;
 }
 
 export function ScopeGate({
   action,
   fallback = null,
   children,
+  tenantOverride,
 }: ScopeGateProps): React.JSX.Element {
-  const gate = useScopeGate();
+  const gate = useScopeGate(tenantOverride);
   if (gate.loading) return <>{null}</>;
   return <>{gate.can(action) ? children : fallback}</>;
 }

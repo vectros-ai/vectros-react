@@ -123,4 +123,26 @@ describe('<ScopeGate>', () => {
     expect(screen.queryByTestId('allow')).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('forwards tenantOverride through to useScopeGate — the single-tenant-host escape hatch', () => {
+    // A single-tenant host with no CurrentTenantProvider must be able to pin
+    // useScopeGate's tenant explicitly, or the gate never resolves (see
+    // tenantOverride's own doc on ScopeGateProps). Assert the prop actually
+    // reaches the hook call, not just that it type-checks.
+    mockUseScopeGate.mockReturnValue({
+      loading: false,
+      allowedActions: ['entities:c:org'],
+      identity: {},
+      can: (a) => a === 'entities:c:org',
+    });
+
+    render(
+      <ScopeGate action="entities:c:org" tenantOverride="exchange-resolved">
+        <Allow />
+      </ScopeGate>,
+    );
+
+    expect(mockUseScopeGate).toHaveBeenCalledWith('exchange-resolved');
+    expect(screen.getByTestId('allow')).toBeInTheDocument();
+  });
 });

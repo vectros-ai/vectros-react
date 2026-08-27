@@ -16,11 +16,23 @@ look and behave the same without copy-paste:
   provider's actual integration mode — see each interface's doc comment for which is which.
 - **Vectros API token cache** — short-lived `st_*` bearers minted on demand and
   cached per `(tenant, context)`, with concurrent-mint coalescing and a
-  clear-during-mint race guard. The mint function is **injected**, so the
-  `/developer/*` call stays inside the swap point.
+  clear-during-mint race guard. The mint function is **injected**
+  (`setPartnerApiTokenMinter`), so the `/developer/*` call stays inside the
+  swap point. Optionally also register `setPartnerApiTokenAssumer` and pass a
+  third `{ namespace: 'scope:<ns>', value }` argument to `getVectrosApiToken`
+  to get back a bearer with that identity namespace assumed to a different
+  admitted value (`POST /v1/auth/token/assume`, for a multi-org practitioner
+  choosing which org to act as) — cached in its own slot, separate from the
+  base bearer. Omit the assumer entirely for a tenant/context-only app
+  (admin-app's shape); the override branch is then simply never reached.
 - **MFA** — a TOTP enrollment wizard and the `/account` 2FA pattern.
 - **UI primitives** — `AuthCard`, `PasswordField` (+ strength meter), `AppLayout`
   chrome, `IntlProvider` scaffolding, and the tenant/context switchers.
+- **Schema-driven record UI** — `RecordFormFields` renders a typed input per schema field
+  (string/number/boolean/date/enum) from a `FieldDef[]` + `renderHints`, and
+  `deriveValueColumns`/`sortRecords`/`payloadMatchesQuery` derive a records-list table (columns,
+  client-side sort, free-text filter) from the same schema shape — build a record editor/list page
+  around these instead of hand-rolling one per record type.
 - **Version-update banner** — `VersionUpdateBanner` polls a `version.json`
   manifest and offers a user-initiated refresh when a newer build is deployed,
   so a long-open tab never strands on a stale shell.

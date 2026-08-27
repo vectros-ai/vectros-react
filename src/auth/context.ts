@@ -74,6 +74,7 @@ export interface AuthContextValue {
   // re-fetches the user via the adapter on success, same as signIn above.
   readonly signInWithRedirect?: (options?: { readonly returnTo?: string }) => Promise<void>;
   readonly handleRedirectCallback?: () => Promise<void>;
+  readonly acceptInvite?: (inviteToken: string) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

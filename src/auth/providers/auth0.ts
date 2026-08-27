@@ -51,12 +51,18 @@ import type { AuthProviderAdapter, AuthUser, HostedRedirectAuth } from '../types
  * - `exchangeEndpoint` — the full URL of Vectros's `POST /v1/auth/token/exchange`
  *   route (e.g. `https://api.vectros.ai/v1/auth/token/exchange`), an RFC 8693
  *   token-exchange endpoint. Unauthenticated — no Vectros credential is
- *   presented, only the Auth0 ID token.
+ *   presented, only the Auth0 ACCESS token (see {@link Auth0AuthProvider.exchangeToken}'s
+ *   own doc for why it's the access token and not the ID token).
  * - `authorizationParams.audience` — the Auth0 API identifier this app's
  *   Auth0 application is authorized for. Vectros's exchange handler resolves
  *   the target tenant + context from the registered `(issuer, audience)`
  *   pair — this MUST match the `audience` value the tenant owner registered
- *   for this issuer.
+ *   for this issuer. **Required for `exchangeToken` to work at all** — Auth0
+ *   only mints a real, verifiable JWT access token when a custom audience is
+ *   requested; omitting this makes `client.getTokenSilently()` return an
+ *   OPAQUE (non-JWT) access token instead, which the exchange endpoint cannot
+ *   verify. This provider does not (and cannot, from the client alone) guard
+ *   against that misconfiguration — it fails at the exchange endpoint, not here.
  */
 export interface Auth0AuthProviderConfig {
   readonly domain: string;
@@ -97,6 +103,33 @@ interface ExchangeErrorResponse {
 // silently falls through to a generic message for an Auth0-caused failure.
 // ---------------------------------------------------------------------------
 
+/**
+ * Best-effort detection of Auth0's "please verify your email" rejection.
+ *
+ * Live-tested 2026-08-26: signing up fresh (email verification required on
+ * the connection, as it should be) and immediately attempting to sign in
+ * fails silently from the user's perspective — no token ever reaches this
+ * app, the SDK's `handleRedirectCallback()` throws, and before this fix
+ * every such throw mapped to the generic `UNKNOWN` code (a static "something
+ * went wrong" with no indication a verification email was even sent). The
+ * ONE thing distinguishing it from every other rejection is the error text
+ * Auth0 puts on the OAuth error redirect — its documented default is
+ * `error=unauthorized&error_description=Please verify your email before
+ * logging in.` — which `auth0-spa-js` surfaces as a plain `Error` carrying
+ * that description as `.message`.
+ *
+ * Matched by PATTERN (verify + email, both present, case-insensitive) rather
+ * than the exact default string: Auth0 lets a tenant customize this text, and
+ * a future Auth0 dashboard copy change shouldn't silently regress this back
+ * to UNKNOWN. Deliberately conservative in the other direction too — this
+ * must never fire on an unrelated message that happens to mention "email"
+ * (e.g. a real network error touching an email field) without also
+ * mentioning verification.
+ */
+function looksLikeUnverifiedEmailError(message: string): boolean {
+  return /verif(?:y|ied|ication)/i.test(message) && /e-?mail/i.test(message);
+}
+
 function mapAuth0Error(e: unknown): AuthError {
   if (e instanceof AuthError) return e;
   if (!(e instanceof Error)) {
@@ -108,6 +141,9 @@ function mapAuth0Error(e: unknown): AuthError {
   if (e.name === 'TypeError' && /fetch|network/i.test(e.message)) {
     return new AuthError('NETWORK_ERROR', e.message);
   }
+  if (looksLikeUnverifiedEmailError(e.message)) {
+    return new AuthError('EMAIL_NOT_VERIFIED', e.message);
+  }
   return new AuthError('UNKNOWN', e.message);
 }
 
@@ -118,6 +154,18 @@ async function tryAuth0<T>(fn: () => Promise<T>): Promise<T> {
   } catch (e) {
     throw mapAuth0Error(e);
   }
+}
+
+/**
+ * How long to wait before the one-shot self-signup-race retry in
+ * {@link Auth0AuthProvider.exchangeToken} below. Short enough not to be a
+ * noticeable UI stall; long enough to clear a same-second concurrent write
+ * on the other side of the race.
+ */
+const EXCHANGE_RACE_RETRY_DELAY_MS = 400;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -247,8 +295,20 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
   }
 
   /**
-   * Exchange the current Auth0 ID token for a Vectros partner-API `st_*`
+   * Exchange the current Auth0 session for a Vectros partner-API `st_*`
    * bearer via `POST /v1/auth/token/exchange` (RFC 8693 token exchange).
+   *
+   * Presents the ACCESS token, not the ID token, and this is load-bearing:
+   * the exchange contract requires the presented token's `aud` claim to
+   * equal the audience recorded on the registered issuer. An ID token's
+   * `aud` is always the requesting client id — that's OIDC's own rule, not
+   * an Auth0 quirk — so it can never carry a custom API audience. The
+   * access token does, because it's minted against
+   * `config.authorizationParams.audience` (the constructor above), and
+   * Auth0 issues it as a real, verifiable JWT whenever a custom audience is
+   * requested. Sent under the generic `...token-type:jwt` label, since
+   * `...token-type:access_token` isn't one the exchange endpoint accepts.
+   *
    * `inviteToken`/`signupType` are forwarded on the request body for the
    * one-time first-exchange cases (accepting an invitation, or self-service
    * signup) — an accept-invitation or self-signup page calls this directly
@@ -259,36 +319,71 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * (each via its own `POST /v1/auth/issuers` row + audience) — omit it when
    * the issuer serves exactly one, the common case, which this field's
    * addition doesn't change.
+   *
+   * **One bounded retry on a 403 — but NOT when `inviteToken` is set.** The exchange endpoint
+   * deliberately returns the SAME generic `403 invalid_grant` for several distinct server-side
+   * rejections (uniform-not-found discipline — see the endpoint's own contract doc) — this client
+   * can't tell them apart, and must not guess. But one of those causes is genuinely transient: two
+   * near-simultaneous first-time exchanges for the SAME brand-new identity race each other
+   * server-side, and the loser gets this exact 403 even though the identity now exists and an
+   * immediate retry would match it directly (observed live, 2026-08-21 — a StrictMode-driven
+   * double-mount fired this exact race in local dev; the underlying hazard isn't StrictMode-specific,
+   * just easiest to trigger there). A single retry after a short delay costs nothing on every OTHER
+   * cause of a 403 (a missing role, an elevated-scope block, a torn-down context, a still-unresolved
+   * self-signup policy) — those fail again identically.
+   *
+   * **Why `inviteToken` is the one case excluded, not `signupType`.** The race lives entirely
+   * inside the server's self-signup path, which the server itself SKIPS whenever an `invite_token`
+   * is present (an invite attempt either succeeds or fails as an invite — it never falls through to
+   * self-signup, by the endpoint's own documented contract). So a 403 with `inviteToken` set is
+   * never this race — it's a real invite-bind rejection (bad/expired/already-used token), and
+   * retrying it only doubles load on that endpoint for zero benefit, which matters most during the
+   * exact incident/misconfiguration window when it's least wanted (`TokenExchangeFunction` has no
+   * rate limiter of its own — see its own CFN comment). `signupType`, by contrast, does NOT gate the
+   * self-signup path at all (the server resolves the tenant's sole policy whether or not the client
+   * names it) — an explicit self-signup page passing `signupType` hits the identical race an
+   * ordinary cache-driven re-mint does, so it stays covered by the retry.
    */
   async exchangeToken(options?: {
     readonly inviteToken?: string;
     readonly signupType?: string;
     readonly contextId?: string;
   }): Promise<{ readonly token: string; readonly expiresAtMs: number }> {
-    const idToken = await this.getIdToken();
-    if (!idToken) {
+    let accessToken: string;
+    try {
+      accessToken = await this.client.getTokenSilently();
+    } catch {
       throw new AuthError('INVALID_CREDENTIALS', 'Not authenticated — cannot exchange a token.');
     }
-    let resp: Response;
-    try {
-      resp = await fetch(this.config.exchangeEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
-          subject_token: idToken,
-          subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
-          ...(options?.inviteToken ? { invite_token: options.inviteToken } : {}),
-          ...(options?.signupType ? { signup_type: options.signupType } : {}),
-          ...(options?.contextId ? { context_id: options.contextId } : {}),
-        }),
-      });
-    } catch (e) {
-      throw new AuthError(
-        'NETWORK_ERROR',
-        e instanceof Error ? e.message : 'Token exchange request failed.',
-      );
+
+    const attempt = async (): Promise<Response> => {
+      try {
+        return await fetch(this.config.exchangeEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+            subject_token: accessToken,
+            subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
+            ...(options?.inviteToken ? { invite_token: options.inviteToken } : {}),
+            ...(options?.signupType ? { signup_type: options.signupType } : {}),
+            ...(options?.contextId ? { context_id: options.contextId } : {}),
+          }),
+        });
+      } catch (e) {
+        throw new AuthError(
+          'NETWORK_ERROR',
+          e instanceof Error ? e.message : 'Token exchange request failed.',
+        );
+      }
+    };
+
+    let resp = await attempt();
+    if (resp.status === 403 && !options?.inviteToken) {
+      await delay(EXCHANGE_RACE_RETRY_DELAY_MS);
+      resp = await attempt();
     }
+
     if (!resp.ok) {
       const body = (await resp.json().catch(() => null)) as ExchangeErrorResponse | null;
       // The server deliberately keeps 401/403/404 bodies generic (uniform
@@ -321,5 +416,11 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
     contextId?: string,
   ): Promise<{ readonly token: string; readonly expiresAtMs: number }> {
     return this.exchangeToken(contextId ? { contextId } : undefined);
+  }
+
+  /** {@link HostedRedirectAuth.acceptInvite} — a thin `exchangeToken` wrapper that
+   *  discards the returned token on purpose; see that interface's own doc for why. */
+  async acceptInvite(inviteToken: string): Promise<void> {
+    await this.exchangeToken({ inviteToken });
   }
 }

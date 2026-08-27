@@ -63,6 +63,7 @@ import {
 import { useAuth } from '../auth';
 import { useCurrentTenant } from '../auth';
 import { ScopeGate } from '../auth';
+import type { TenantId } from '../auth';
 
 const DRAWER_WIDTH = 220;
 
@@ -88,10 +89,13 @@ interface NavListProps {
   readonly navItems: ReadonlyArray<NavItemSpec>;
   /** Called when a nav item is selected. Used by the mobile Drawer to close. */
   readonly onItemSelect?: () => void;
+  /** Forwarded to each gated item's `<ScopeGate tenantOverride={...}>` — see
+   *  {@link AppLayoutProps.scopeGateTenant}. */
+  readonly scopeGateTenant?: TenantId;
 }
 
 /** Vertical nav list rendered inside the sidebar Drawer. */
-function NavList({ navItems, onItemSelect }: NavListProps): React.JSX.Element {
+function NavList({ navItems, onItemSelect, scopeGateTenant }: NavListProps): React.JSX.Element {
   const intl = useIntl();
   return (
     // `component="nav"` makes this a navigation landmark (a11y); the aria-label
@@ -132,7 +136,11 @@ function NavList({ navItems, onItemSelect }: NavListProps): React.JSX.Element {
         );
         if (item.gateAction === null) return link;
         return (
-          <ScopeGate key={item.to} action={item.gateAction}>
+          <ScopeGate
+            key={item.to}
+            action={item.gateAction}
+            {...(scopeGateTenant ? { tenantOverride: scopeGateTenant } : {})}
+          >
             {link}
           </ScopeGate>
         );
@@ -226,6 +234,20 @@ export interface AppLayoutProps {
   readonly navItems: ReadonlyArray<NavItemSpec>;
   /** Optional AppBar node rendered when signed in (a tenant/context switcher). */
   readonly switcher?: ReactNode;
+  /**
+   * Forwarded to every gated nav item's `<ScopeGate tenantOverride={...}>`.
+   * Omit in a multi-tenant host — each `ScopeGate` reads the active tenant
+   * from `useCurrentTenant()` (the TenantSwitcher-controlled tenant), the
+   * common case. A single-tenant host with no `CurrentTenantProvider` in its
+   * tree MUST supply a stable, app-wide constant here, or every gated nav
+   * item stays hidden forever: `useCurrentTenant()` falls back to
+   * `tenant: null` with no provider, and the underlying `useScopeGate()`
+   * call's mint effect never fires for a null tenant, so `loading` never
+   * resolves. (Any non-empty string works — a single-tenant exchange-based
+   * provider ignores the value itself; see
+   * `Auth0AuthProvider.mintPartnerApiToken`.)
+   */
+  readonly scopeGateTenant?: TenantId;
 }
 
 export function AppLayout({
@@ -234,6 +256,7 @@ export function AppLayout({
   brandQualifier,
   navItems,
   switcher,
+  scopeGateTenant,
 }: AppLayoutProps): React.JSX.Element {
   const { user, signOut } = useAuth();
   // Tenant gate: while memberships + active tenant load, the routed page
@@ -303,7 +326,11 @@ export function AppLayout({
         {...(brandQualifier ? { brandQualifier } : {})}
       />
       <Divider sx={{ borderColor: RAIL_DIVIDER }} />
-      <NavList navItems={navItems} {...(onItemSelect ? { onItemSelect } : {})} />
+      <NavList
+        navItems={navItems}
+        {...(onItemSelect ? { onItemSelect } : {})}
+        {...(scopeGateTenant ? { scopeGateTenant } : {})}
+      />
     </>
   );
 

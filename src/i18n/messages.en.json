@@ -43,5 +43,9 @@
   "password.strengthVeryWeak": "Very weak",
   "password.strengthWeak": "Weak",
   "password.visibilityToggleHide": "Hide password",
-  "password.visibilityToggleShow": "Show password"
+  "password.visibilityToggleShow": "Show password",
+  "recordForm.enumNone": "(none)",
+  "recordForm.errorEnum": "Choose one of the allowed values.",
+  "recordForm.errorRequired": "This field is required.",
+  "recordForm.rawOnlyNote": "These fields can only be edited in the raw JSON view:"
 }

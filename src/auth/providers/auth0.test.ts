@@ -56,6 +56,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Unconditional, not just the two tests that call vi.useFakeTimers() —
+  // if either of THOSE tests' own expect() throws, their inline
+  // vi.useRealTimers() call never runs, and fake-timer state would otherwise
+  // leak into every later test in this file. A no-op when real timers are
+  // already active.
+  vi.useRealTimers();
 });
 
 describe('Auth0AuthProvider.getCurrentUser', () => {
@@ -241,6 +247,33 @@ describe('Auth0AuthProvider.handleRedirectCallback', () => {
     await provider().handleRedirectCallback();
     expect(mockClient.handleRedirectCallback).not.toHaveBeenCalled();
   });
+
+  it("maps Auth0's default unverified-email rejection to EMAIL_NOT_VERIFIED, not the generic UNKNOWN", async () => {
+    // Live-tested 2026-08-26: signing up fresh, then immediately attempting
+    // to sign in with email verification required, fails with exactly this
+    // shape — Auth0's own default error_description.
+    resetLocation('/callback?error=unauthorized&error_description=Please+verify+your+email+before+logging+in.');
+    mockClient.handleRedirectCallback.mockRejectedValue(
+      new Error('Please verify your email before logging in.'),
+    );
+    const err = await provider()
+      .handleRedirectCallback()
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).code).toBe('EMAIL_NOT_VERIFIED');
+  });
+
+  it('does NOT misclassify an unrelated error that happens to mention "email" as EMAIL_NOT_VERIFIED', async () => {
+    resetLocation('/callback?error=server_error&error_description=failed');
+    mockClient.handleRedirectCallback.mockRejectedValue(
+      new Error('Could not deliver to the configured email address.'),
+    );
+    const err = await provider()
+      .handleRedirectCallback()
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).code).toBe('UNKNOWN');
+  });
 });
 
 describe('Auth0AuthProvider.signOut', () => {
@@ -264,8 +297,12 @@ describe('Auth0AuthProvider.signOut', () => {
 });
 
 describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
-  it('exchanges the current ID token for a partner-API bearer', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
+  it('exchanges the current ACCESS token (not the ID token) for a partner-API bearer', async () => {
+    // Not getIdTokenClaims — the exchange contract requires the presented
+    // token's `aud` claim to equal the registered issuer's audience, which
+    // only the access token carries (an ID token's `aud` is always the
+    // client id, by OIDC spec, regardless of provider).
+    mockClient.getTokenSilently.mockResolvedValue('the-access-token');
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
@@ -289,13 +326,12 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
     >;
     expect(body).toEqual({
       grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
-      subject_token: 'the-id-token',
-      subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+      subject_token: 'the-access-token',
+      subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
     });
   });
 
   it('forwards inviteToken/signupType on the request body when supplied', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
@@ -313,7 +349,6 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
   });
 
   it('forwards contextId on the request body when supplied to exchangeToken', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
@@ -330,7 +365,6 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
   });
 
   it('omits context_id from the request body when exchangeToken is called with none', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
@@ -347,7 +381,6 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
   });
 
   it('mintPartnerApiToken forwards its second (contextId) argument to exchangeToken', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
@@ -365,35 +398,130 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
     expect(body['context_id']).toBe('ctx_billing');
   });
 
-  it('throws INVALID_CREDENTIALS when there is no ID token to exchange', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue(undefined);
+  it('throws INVALID_CREDENTIALS when there is no session to mint an access token from', async () => {
+    mockClient.getTokenSilently.mockRejectedValue(new Error('Login required'));
     await expect(provider().exchangeToken()).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
   });
 
-  it('maps a non-ok exchange response to an AuthError carrying the OAuth error code', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 403,
-        json: () =>
-          Promise.resolve({ error: 'invalid_grant', error_description: 'The presented token could not be exchanged' }),
-      }),
-    );
+  it('retries once on a persistent 403 (a genuine rejection, not just the race) and still maps to AuthError', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () =>
+        Promise.resolve({ error: 'invalid_grant', error_description: 'The presented token could not be exchanged' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
-    const err = await provider()
+    const pending = provider()
       .exchangeToken()
       .catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+    vi.useRealTimers();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(err).toBeInstanceOf(AuthError);
     expect((err as AuthError).message).toContain('403');
     expect((err as AuthError).message).toContain('invalid_grant');
   });
 
+  it('retries once on a 403 and succeeds if the identity has cleared the race by the retry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetchMock = vi
+      .fn()
+      // First attempt: this call lost a self-signup race server-side.
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: 'invalid_grant', error_description: 'x' }),
+      })
+      // Retry: the identity now exists (the winner created it), matches directly.
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = provider().exchangeToken();
+    await vi.runAllTimersAsync();
+    const result = await pending;
+    vi.useRealTimers();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.token).toBe('st_live_abc');
+  });
+
+  it('does NOT retry a 403 when inviteToken is set — the server never runs the self-signup race for an invite attempt', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () =>
+        Promise.resolve({ error: 'invalid_grant', error_description: 'The presented token could not be exchanged' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const err = await provider()
+      .exchangeToken({ inviteToken: 'inv_expired' })
+      .catch((e: unknown) => e);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(AuthError);
+  });
+
+  it('does NOT retry a non-403 rejection (e.g. a malformed subject_token, 400)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () =>
+        Promise.resolve({ error: 'invalid_request', error_description: 'subject_token is not a well-formed JWT' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const err = await provider()
+      .exchangeToken()
+      .catch((e: unknown) => e);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).message).toContain('400');
+  });
+
   it('maps a fetch/network failure to NETWORK_ERROR', async () => {
-    mockClient.getIdTokenClaims.mockResolvedValue({ __raw: 'the-id-token' });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
 
     await expect(provider().exchangeToken()).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  });
+});
+
+describe('Auth0AuthProvider.acceptInvite', () => {
+  it('exchanges with the invite token on the request body and resolves void', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await provider().acceptInvite('inv_x');
+
+    expect(result).toBeUndefined();
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body) as Record<
+      string,
+      unknown
+    >;
+    expect(body['invite_token']).toBe('inv_x');
+  });
+
+  it('propagates a rejection from the underlying exchange (bad/expired/already-used token)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: 'invalid_grant', error_description: 'invite token expired' }),
+      }),
+    );
+
+    await expect(provider().acceptInvite('inv_expired')).rejects.toBeInstanceOf(AuthError);
   });
 });

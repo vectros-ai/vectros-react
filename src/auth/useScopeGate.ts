@@ -36,6 +36,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { decompressScopeClaim } from './scopeCompression';
 import { getVectrosApiToken } from './vectrosApiTokenCache';
 import type { TenantId } from './types';
 import { useCurrentTenant } from './useCurrentTenant';
@@ -91,16 +92,23 @@ function isOpsString(s: string): boolean {
  *   `users:u`) or combined into one (`users:cru`) and still be recognized identically —
  *   the shape the split-entries authoring path produces and the combined-entry path
  *   also produces are the same grant.
- * - anything else (a bare custom verb, a 3-segment qualified form like
- *   `'documents:r:foo'`, or a malformed ops string) — falls back to an EXACT string
- *   match against `allowedActions`. This is deliberate, not an oversight: a QUALIFIED
- *   grant narrows to a specific resource instance, so it must NOT be unioned into an
- *   UNQUALIFIED ask — doing so would let a caller scoped to one record type or
- *   namespace appear to hold the resource generally. Whether a qualifier is actually
- *   meaningful for a given resource+op is a platform authorization-grammar question
- *   (the qualifiable-resource / sensitive-reveal axes of the scope grammar) this client-side
- *   predicate does not attempt to replicate — the exact-match fallback is the
- *   conservative choice: never wider than what the caller can prove.
+ * - the qualified `resource:ops:qualifier` form — e.g. `'records:r:case'` — evaluated by
+ *   the SAME ops-union, narrowed to entries sharing BOTH the resource AND the exact
+ *   qualifier. `'records:crud:case'` (one combined qualified entry, the shape a role's
+ *   `allowedActions: [records:crud:case]` clause produces) satisfies an ask for
+ *   `'records:r:case'` the same way `'users:cru'` satisfies `'users:r'` — this is NOT the
+ *   widening the module doc's "qualified grant into unqualified ask" warning is about:
+ *   the qualifier is identical on both sides, so nothing is generalized across resource
+ *   instances. A qualified GRANT still never contributes to an ask with a DIFFERENT
+ *   qualifier, or to an unqualified ask (that path is untouched); an UNQUALIFIED grant
+ *   still never contributes to a qualified ask either (seen only via the exact-match
+ *   fallback below, unchanged) — both keep the conservative, never-wider-than-what's-
+ *   granted property the unqualified case already has.
+ * - anything else (a bare custom verb, an ask/grant whose ops segment isn't a
+ *   recognized ops string, or a length mismatch between ask and grant) — falls back to
+ *   an EXACT string match against `allowedActions`. This is deliberate, not an
+ *   oversight — the exact-match fallback is the conservative choice: never wider than
+ *   what the caller can prove.
  */
 export function canPerform(
   allowedActions: ReadonlyArray<string>,
@@ -109,21 +117,28 @@ export function canPerform(
   if (allowedActions.includes('*')) return true;
 
   const askedSegs = action.split(':');
-  if (askedSegs.length === 2) {
-    const [resource, askedOps] = askedSegs;
+  if (askedSegs.length === 2 || askedSegs.length === 3) {
+    const [resource, askedOps, askedQualifier] = askedSegs;
     if (resource && isOpsString(askedOps ?? '')) {
       let grantedOps = '';
       for (const raw of allowedActions) {
         const segs = raw.split(':');
-        if (segs.length !== 2) continue; // qualified (or malformed) — not unioned in
-        const [grantedResource, grantedOpsStr] = segs;
+        if (segs.length !== askedSegs.length) continue; // shape mismatch — not unioned in
+        const [grantedResource, grantedOpsStr, grantedQualifier] = segs;
         if (grantedResource !== resource) continue;
+        if (askedSegs.length === 3 && grantedQualifier !== askedQualifier) continue;
         if (!isOpsString(grantedOpsStr ?? '')) continue;
         for (const c of grantedOpsStr ?? '') {
           if (!grantedOps.includes(c)) grantedOps += c;
         }
       }
-      return [...(askedOps ?? '')].every((c) => grantedOps.includes(c));
+      if (grantedOps) {
+        return [...(askedOps ?? '')].every((c) => grantedOps.includes(c));
+      }
+      // No same-shape entry matched at all (e.g. only an unqualified grant exists
+      // for a qualified ask, or vice versa) — fall through to exact-match below
+      // rather than report denial from an empty union, so a literal-string grant
+      // shaped exactly like the ask is still recognized.
     }
   }
 
@@ -152,9 +167,18 @@ const decodedByToken = new Map<string, DecodedScopeClaims>();
  * two separate functions before `identity` existed, so existing callers of
  * `decodeAllowedActions` are unaffected).
  *
- * Token shape: `st_(live|test)_<base64url-header>.<base64url-payload>.<base64url-sig>`.
- * (Some callers may pass the bare JWT without the `st_<env>_` prefix — we
- * handle both.)
+ * Token shape: `st_<base64url-header>.<base64url-payload>.<base64url-sig>` —
+ * the platform mints tokens as `"st_" + jwt`, with no `live`/`test` env infix
+ * despite what an older comment here claimed. (Some callers may pass the
+ * bare JWT without the `st_` prefix — we handle both; the payload segment's
+ * INDEX is unaffected either way, since the prefix has no `.` in it.)
+ *
+ * **The `scope` claim itself is DEFLATE-compressed + base64url-encoded** —
+ * see `scopeCompression.ts`'s file header for the full story (including the
+ * dictionary-drift risk this decode carries) and for the decompression this
+ * is the inverse of. Decompression failure (corrupt data, or a dictionary
+ * that's drifted out of sync with the platform's) is handled the same as
+ * any other malformed-token case below: empty claims, no throw.
  *
  * **No signature verification.** The backend re-verifies on every request, and
  * client-side scope is a UX optimization only. Forged claims widen the visible
@@ -164,8 +188,8 @@ function decodeScopeClaims(token: string): DecodedScopeClaims {
   const cached = decodedByToken.get(token);
   if (cached) return cached;
 
-  // Strip the st_<env>_ prefix if present.
-  const stripped = token.replace(/^st_(live|test)_/, '');
+  // Strip the st_ prefix if present.
+  const stripped = token.replace(/^st_/, '');
   const parts = stripped.split('.');
   if (parts.length !== 3) {
     decodedByToken.set(token, EMPTY_CLAIMS);
@@ -178,14 +202,22 @@ function decodeScopeClaims(token: string): DecodedScopeClaims {
     const padding = (4 - (standard.length % 4)) % 4;
     const padded = standard + '='.repeat(padding);
     const json = atob(padded);
-    const claims = JSON.parse(json) as {
-      scope?: {
-        scopes?: ReadonlyArray<{ allowed_actions?: unknown }>;
-        identity?: unknown;
-      };
-    };
+    const claims = JSON.parse(json) as { scope?: unknown };
 
-    const clauses = claims.scope?.scopes;
+    // `scope` is a compressed opaque string on every real token — decompress
+    // it back into the `{scopes, identity}` shape below. A plain object is
+    // also accepted (test fixtures, and a defensive
+    // hedge against any future rollback of the compression change) so this
+    // decode doesn't itself become a second thing to keep in lockstep with a
+    // wire-format change.
+    let scopeClaims: { scopes?: ReadonlyArray<{ allowed_actions?: unknown }>; identity?: unknown } | undefined;
+    if (typeof claims.scope === 'string') {
+      scopeClaims = JSON.parse(decompressScopeClaim(claims.scope)) as typeof scopeClaims;
+    } else if (claims.scope != null && typeof claims.scope === 'object') {
+      scopeClaims = claims.scope as typeof scopeClaims;
+    }
+
+    const clauses = scopeClaims?.scopes;
     let allowedActions = EMPTY_ACTIONS;
     if (Array.isArray(clauses)) {
       const actions = new Set<string>();
@@ -203,7 +235,7 @@ function decodeScopeClaims(token: string): DecodedScopeClaims {
     // `partnerUserId` when the token is bound to a specific user). Omitted
     // entirely on the wire for a credential with none (an OWNER session) —
     // never present as an empty object, but we treat both the same way here.
-    const rawIdentity = claims.scope?.identity;
+    const rawIdentity = scopeClaims?.identity;
     let identity = EMPTY_IDENTITY;
     if (rawIdentity != null && typeof rawIdentity === 'object' && !Array.isArray(rawIdentity)) {
       const result: Record<string, string> = {};
@@ -285,6 +317,17 @@ export function useScopeGate(tenantOverride?: TenantId): ScopeGateValue {
     // the PRIOR tenant's claims during the re-mint — otherwise a scoped user
     // switching tenants briefly gates routes on the old tenant's scope.
     setDecoded(null);
+
+    // The retry-on-a-failed-mint logic used to live here, per hook instance.
+    // Moved DOWN into vectrosApiTokenCache.ts's getVectrosApiToken itself
+    // (2026-08-26) — several independent consumers (this hook, on nav items
+    // for different actions) each call getVectrosApiToken around the same
+    // moment, and a per-instance retry here couldn't stop each one from
+    // independently racing its OWN fresh mint the instant its predecessor's
+    // failure cleared the shared slot. Retrying inside the cache's own
+    // in-flight promise means every consumer arriving during the retry
+    // window joins the SAME attempt instead of starting an independent one.
+    // See that module's SHARED_MINT_RETRY_DELAY_MS doc for the full story.
     getVectrosApiToken(tenantId)
       .then((token) => {
         if (!cancelled) setDecoded(decodeScopeClaims(token));

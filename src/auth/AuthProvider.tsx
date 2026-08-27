@@ -169,6 +169,10 @@ export function AuthProvider({ provider, children }: AuthProviderProps): React.J
     // Refresh unconditionally; getCurrentUser stays null if it didn't.
     await refreshUser();
   }, [provider, refreshUser]);
+  const acceptInvite = useCallback(
+    (inviteToken: string): Promise<void> => provider.acceptInvite!(inviteToken),
+    [provider],
+  );
 
   const value = useMemo<AuthContextValue>(() => {
     const core = { user, loading, isAuthenticated: user !== null, signOut, getIdToken };
@@ -188,7 +192,7 @@ export function AuthProvider({ provider, children }: AuthProviderProps): React.J
           disableTotp,
         }
       : {};
-    const hosted = hasHosted ? { signInWithRedirect, handleRedirectCallback } : {};
+    const hosted = hasHosted ? { signInWithRedirect, handleRedirectCallback, acceptInvite } : {};
     return { ...core, ...embedded, ...hosted };
   }, [
     user,
@@ -211,6 +215,7 @@ export function AuthProvider({ provider, children }: AuthProviderProps): React.J
     hasHosted,
     signInWithRedirect,
     handleRedirectCallback,
+    acceptInvite,
   ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

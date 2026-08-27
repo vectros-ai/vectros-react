@@ -40,9 +40,43 @@
 // purpose: one logout invalidates EVERY slot — the underlying Cognito session is
 // shared. A context switch also calls clear(), so a stale-context bearer can
 // never survive into the new context.
+//
+// **The identity-override axis (`POST /v1/auth/token/assume`).** A (tenant,
+// context) bearer's `identity.<namespace>` (e.g. `scope:org`) picks ONE default
+// value — for a caller admitted to more than one (a multi-org practitioner
+// switching which org a new record is placed under), a DIFFERENT bearer is
+// needed per active value. Rather than a second minting path, the cache layers
+// on top of the existing (tenant, context) slot: an override request first
+// resolves the BASE bearer for that slot (via the ordinary minter, sharing its
+// cache entry with every other caller of that slot), then exchanges it for an
+// assumed bearer via the injected `PartnerApiTokenAssumer` — the SDK client
+// method for `POST /v1/auth/token/assume`. The assumed bearer gets its OWN
+// cache slot, keyed by (tenant, context, namespace, value), so switching back
+// and forth between two orgs re-uses both cached bearers instead of
+// re-exchanging every time. Same refresh/coalescing/generation-counter
+// machinery as the base path — see `getVectrosApiToken`'s override branch.
+//
+// Named `*Override`/`*Assumer` rather than `*Switch(er)` deliberately — an
+// earlier draft of this axis was built against a since-deleted `/switch`
+// endpoint design (a broader entitlement check found unsound before it
+// shipped). This module was renamed to match the endpoint that actually
+// exists, `POST /v1/auth/token/assume`, entitlement checked against a single
+// requested value at a time, never inferred from broader read/write reach.
 // ---------------------------------------------------------------------------
 
 import type { TenantId } from './types';
+
+/**
+ * Which single-value identity namespace to activate on the returned bearer, and
+ * which value — the `POST /v1/auth/token/assume` request shape, e.g.
+ * `{ namespace: 'scope:org', value: 'orgB' }`. Optional third argument to
+ * {@link getVectrosApiToken}; omit for the base (tenant, context) bearer.
+ */
+export interface VectrosIdentityOverride {
+  /** Canonical `scope:<namespace>` form, matching the API's own grammar. */
+  readonly namespace: string;
+  readonly value: string;
+}
 
 /**
  * How long before expiry to proactively re-mint. With a ~900s mint TTL and
@@ -50,6 +84,31 @@ import type { TenantId } from './types';
  * mint, then mints a fresh one on the next call.
  */
 const REFRESH_BEFORE_MS = 60_000;
+
+/**
+ * How long to wait before ONE shared retry of a failed mint, still within the
+ * SAME in-flight promise (see the retry block in {@link getVectrosApiToken}).
+ *
+ * Live-tested 2026-08-26: a token exchange for an identity that was JUST
+ * activated (e.g. the moment `RequireAuth` renders the authenticated shell,
+ * right after a successful invite-accept) can still 403 on its very next
+ * exchange — a real, observed backend-side race/staleness right after
+ * activation (filed separately, platform-side). Several DIFFERENT UI
+ * consumers (nav items' own `ScopeGate`s, etc.) each call `getVectrosApiToken`
+ * independently around the same moment; without this, EACH one raced its own
+ * fresh mint, so one failure didn't stop three more identical failures a
+ * beat later — measured live as 2-3 separate 403s for a SINGLE page load.
+ * Keeping the retry INSIDE this same in-flight promise (rather than, say,
+ * each caller retrying on its own after catching a rejection) means any
+ * caller arriving during the delay/retry window JOINS this one attempt
+ * instead of starting an independent one of its own — collapsing what were
+ * several racing failures into one shared recovery.
+ */
+const SHARED_MINT_RETRY_DELAY_MS = 1500;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Mints a partner-API bearer scoped to `tenantId` and (optionally) `contextId`,
@@ -65,9 +124,22 @@ export type PartnerApiTokenMinter = (
   contextId?: string,
 ) => Promise<{ readonly token: string; readonly expiresAtMs: number }>;
 
+/**
+ * Exchanges an already-minted partner-API bearer for one with a single
+ * identity namespace assumed to a different admitted value — the SDK client
+ * method for `POST /v1/auth/token/assume`. `bearer` is the BASE (tenant,
+ * context) token this cache already holds; the Vectros reference impl calls
+ * the endpoint with that bearer as `Authorization`. A fork supplies its own.
+ * Injected via {@link setPartnerApiTokenAssumer}.
+ */
+export type PartnerApiTokenAssumer = (
+  bearer: string,
+  override: VectrosIdentityOverride,
+) => Promise<{ readonly token: string; readonly expiresAtMs: number }>;
+
 // ---- Module-local state (intentionally not reactive — the axios interceptor
-//      reads + writes these on demand). Keyed by a composite (tenant, context)
-//      string; see slotKey(). ----
+//      reads + writes these on demand). Keyed by a composite (tenant, context[,
+//      namespace, value]) string; see slotKey(). ----
 
 const cachedTokens = new Map<string, string>();
 /** Expiry as epoch-ms. Absent = no token. */
@@ -75,15 +147,20 @@ const cachedExpiriesMs = new Map<string, number>();
 const inFlightMints = new Map<string, Promise<string>>();
 let cacheGeneration = 0;
 let minter: PartnerApiTokenMinter | null = null;
+let assumer: PartnerApiTokenAssumer | null = null;
 
 /**
- * Composite cache key for a (tenant, context) slot. The `|` separator can't
- * appear in a tenantId (`tnt_<uuid>`) or a validated contextId, so the join is
- * unambiguous. A missing contextId collapses to the tenant-only slot key
- * (`<tenantId>|`), which is what admin-app's tenant-only callers use.
+ * Composite cache key for a (tenant, context[, namespace, value]) slot. The
+ * `|` separator can't appear in a tenantId (`tnt_<uuid>`), a validated
+ * contextId, or a validated namespace/value (the API's identifier grammar), so
+ * the join is unambiguous. A missing contextId collapses to the tenant-only
+ * slot key (`<tenantId>|`), which is what admin-app's tenant-only callers use;
+ * a missing override collapses to the plain (tenant, context) slot, unchanged
+ * from before the override axis existed.
  */
-function slotKey(tenantId: TenantId, contextId?: string): string {
-  return `${tenantId}|${contextId ?? ''}`;
+function slotKey(tenantId: TenantId, contextId?: string, override?: VectrosIdentityOverride): string {
+  const base = `${tenantId}|${contextId ?? ''}`;
+  return override ? `${base}|${override.namespace}|${override.value}` : base;
 }
 
 /**
@@ -96,24 +173,48 @@ export function setPartnerApiTokenMinter(source: PartnerApiTokenMinter): void {
 }
 
 /**
+ * Register the function this cache uses to exchange a bearer for an
+ * identity-assumed one (`POST /v1/auth/token/assume`). Only required by apps
+ * that actually pass an {@link VectrosIdentityOverride} to
+ * {@link getVectrosApiToken} — omit it entirely for a tenant/context-only app
+ * (admin-app's shape) and the override branch is simply never reached.
+ */
+export function setPartnerApiTokenAssumer(source: PartnerApiTokenAssumer): void {
+  assumer = source;
+}
+
+/**
  * Get a partner-API st_* bearer for `(tenantId, contextId)`, minting a fresh one
  * if the cached value is absent or near expiry. `contextId` is optional — omit
  * it for the tenant-default context (admin-app), supply it for a specific
  * data-plane context (app.vectros.ai's switcher). Returns the raw token string —
  * callers (the axios interceptor) attach it as `Authorization: Bearer`.
  *
- * Concurrent callers for the SAME (tenant, context) share one in-flight mint
- * Promise; different slots mint independently. See the module comment for the
- * threat model behind the generation counter.
+ * `identityOverride` is optional — omit it for the plain (tenant, context)
+ * bearer (unchanged from before the override axis existed). Supply
+ * `{ namespace, value }` to instead get a bearer with that namespace assumed
+ * to that value (`POST /v1/auth/token/assume`, for a multi-org practitioner
+ * choosing which org to act as) — this slot is cached SEPARATELY from the base
+ * bearer (see the module comment), and resolving it first resolves the base
+ * bearer via the ordinary minter, sharing that slot's own cache/coalescing.
  *
- * @throws if the minter isn't registered or the mint fails.
+ * Concurrent callers for the SAME slot share one in-flight mint Promise;
+ * different slots mint independently. See the module comment for the threat
+ * model behind the generation counter.
+ *
+ * @throws if the minter (or, for an override, the assumer) isn't registered,
+ *         or the mint/assume fails.
  */
-export function getVectrosApiToken(tenantId: TenantId, contextId?: string): Promise<string> {
+export function getVectrosApiToken(
+  tenantId: TenantId,
+  contextId?: string,
+  identityOverride?: VectrosIdentityOverride,
+): Promise<string> {
   if (!tenantId) {
     return Promise.reject(new Error('getVectrosApiToken: a tenantId is required'));
   }
 
-  const key = slotKey(tenantId, contextId);
+  const key = slotKey(tenantId, contextId, identityOverride);
 
   // Cache hit + still safely within the refresh-before-expiry window.
   const now = Date.now();
@@ -134,6 +235,34 @@ export function getVectrosApiToken(tenantId: TenantId, contextId?: string): Prom
   // the mint is in flight, the result is discarded (see module comment).
   const generationAtStart = cacheGeneration;
 
+  /**
+   * How to get a fresh token for THIS slot — the one thing that differs
+   * between the base path and the override path. Not invoked until the IIFE
+   * below actually starts (still synchronous up to here, so the in-flight
+   * Map.set above happens before any await, same as before this branch existed).
+   */
+  const fetchFresh = (): Promise<{ readonly token: string; readonly expiresAtMs: number }> => {
+    if (!identityOverride) {
+      if (!minter) {
+        throw new Error(
+          'vectrosApiTokenCache: partner-API token minter not registered. ' +
+            'Call setPartnerApiTokenMinter() at app boot before any partner-API call.',
+        );
+      }
+      return minter(tenantId, contextId);
+    }
+    if (!assumer) {
+      throw new Error(
+        'vectrosApiTokenCache: partner-API token assumer not registered. ' +
+          'Call setPartnerApiTokenAssumer() at app boot before requesting an identity override.',
+      );
+    }
+    // Resolve the BASE (tenant, context) bearer first — a DIFFERENT cache slot
+    // (no override), so this shares its cache entry and in-flight coalescing
+    // with every other caller of the base token rather than minting a second one.
+    return getVectrosApiToken(tenantId, contextId).then((baseBearer) => assumer!(baseBearer, identityOverride));
+  };
+
   // The IIFE captures `mintPromise` in its finally block to release the
   // in-flight slot only if it still references THIS mint. The definite-
   // assignment assertion + `let` (vs const) shape is required for that
@@ -141,14 +270,44 @@ export function getVectrosApiToken(tenantId: TenantId, contextId?: string): Prom
   let mintPromise!: Promise<string>;
   // eslint-disable-next-line prefer-const
   mintPromise = (async (): Promise<string> => {
+    // Unconditional yield BEFORE any work — load-bearing, not decorative.
+    // Without it, a mint that rejects with NO other `await` before the throw
+    // (the "minter not registered" case is the one that actually happens: a
+    // gated component can render — and call this — before app boot's
+    // setPartnerApiTokenMinter() has run) completes its entire try/finally
+    // SYNCHRONOUSLY, within the same call that's still constructing this
+    // IIFE — i.e. BEFORE the `mintPromise = ...` assignment below and the
+    // `inFlightMints.set(key, mintPromise)` line after it have executed. The
+    // finally's self-reference guard (`inFlightMints.get(key) === mintPromise`)
+    // then compares against a not-yet-assigned `mintPromise`, always reads
+    // false, and never deletes — so `inFlightMints.set` afterwards plants an
+    // ALREADY-REJECTED, ALREADY-FINALLY-RAN promise that nothing will ever
+    // clean up again. Every later caller for this slot joins that same dead
+    // promise forever, even after a minter is registered. Yielding first
+    // guarantees the assignment + the map-set below always complete before
+    // this function's body can possibly reach its own finally.
+    await Promise.resolve();
     try {
-      if (!minter) {
-        throw new Error(
-          'vectrosApiTokenCache: partner-API token minter not registered. ' +
-            'Call setPartnerApiTokenMinter() at app boot before any partner-API call.',
-        );
+      let result: { readonly token: string; readonly expiresAtMs: number };
+      try {
+        result = await fetchFresh();
+      } catch (firstErr) {
+        // Don't retry a "not configured yet" failure — a missing minter/
+        // assumer registration doesn't clear itself on a ~1.5s timescale;
+        // what actually recovers it is the NEXT independent call, once app
+        // boot has caught up (see the "does NOT permanently poison the
+        // slot" test). Retrying here would just cost time for no benefit.
+        const stillUnconfigured = identityOverride ? !assumer : !minter;
+        if (stillUnconfigured || cacheGeneration !== generationAtStart) {
+          throw firstErr;
+        }
+        await delay(SHARED_MINT_RETRY_DELAY_MS);
+        if (cacheGeneration !== generationAtStart) {
+          throw firstErr;
+        }
+        result = await fetchFresh();
       }
-      const { token, expiresAtMs } = await minter(tenantId, contextId);
+      const { token, expiresAtMs } = result;
 
       // If clearVectrosApiTokenCache fired while this mint was in flight, the
       // identity/context it was minted for is no longer active. Throw the result
@@ -202,4 +361,5 @@ export function clearVectrosApiTokenCache(): void {
 export function __resetVectrosApiTokenCacheForTest(): void {
   clearVectrosApiTokenCache();
   minter = null;
+  assumer = null;
 }
