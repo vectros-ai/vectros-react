@@ -42,6 +42,16 @@ export type AuthErrorCode =
    * again," not a code-entry step.
    */
   | 'EMAIL_NOT_VERIFIED'
+  /**
+   * signUp rejected because an identity for that email already exists with
+   * this IdP (Cognito's `UsernameExistsException`). Distinct from
+   * `INVALID_CREDENTIALS`: that code deliberately collapses "wrong
+   * password" and "no such user" to defend against sign-IN enumeration,
+   * but a sign-UP collision on the caller's OWN just-typed email isn't the
+   * same risk — the caller already knows the email exists, they just typed
+   * it. The remedy is "sign in instead," not "try a different password."
+   */
+  | 'USER_ALREADY_EXISTS'
   | 'UNKNOWN';
 
 /**

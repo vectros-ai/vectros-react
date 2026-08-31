@@ -28,6 +28,11 @@ look and behave the same without copy-paste:
 - **MFA** — a TOTP enrollment wizard and the `/account` 2FA pattern.
 - **UI primitives** — `AuthCard`, `PasswordField` (+ strength meter), `AppLayout`
   chrome, `IntlProvider` scaffolding, and the tenant/context switchers.
+- **API-error handling** — `ApiErrorAlert` (renders a Vectros API error consistently, including its
+  request id) and `RequestIdCaption`, plus the `extractErrorMessage`/`extractRequestId`/
+  `statusCodeOf`/`isVersionConflict` helpers they're built on — pull an error's message, request id,
+  HTTP status, or optimistic-concurrency-conflict flag out of any Vectros SDK error without
+  hand-rolling the same extraction per app.
 - **Schema-driven record UI** — `RecordFormFields` renders a typed input per schema field
   (string/number/boolean/date/enum) from a `FieldDef[]` + `renderHints`, and
   `deriveValueColumns`/`sortRecords`/`payloadMatchesQuery` derive a records-list table (columns,

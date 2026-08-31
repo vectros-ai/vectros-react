@@ -1,4 +1,5 @@
 {
+  "error.requestId": "Reference ID: {requestId}",
   "layout.account": "Account",
   "layout.loadingSession": "Loading session",
   "layout.navKeys": "Scoped Keys",

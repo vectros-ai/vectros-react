@@ -136,6 +136,8 @@ function mapAmplifyError(e: unknown): Error {
       return new AuthError('EXPIRED_CODE', e.message);
     case 'InvalidPasswordException':
       return new AuthError('PASSWORD_POLICY_VIOLATION', e.message);
+    case 'UsernameExistsException':
+      return new AuthError('USER_ALREADY_EXISTS', e.message);
     case 'LimitExceededException':
     case 'TooManyRequestsException':
     case 'TooManyFailedAttemptsException':

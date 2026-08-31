@@ -3,6 +3,34 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.10.0 — 2026-08-30
+
+### Added
+
+- **`ApiErrorAlert` + `RequestIdCaption`**, plus the `extractErrorMessage`/`extractRequestId`/
+  `statusCodeOf`/`isVersionConflict` API-error helpers they're built on. Promoted from three
+  near-byte-identical per-app copies — a friendly error `Alert` (announces via `role="alert"`,
+  MUI's own `Alert` has no implicit one) that surfaces a failed call's support-correlation
+  `requestId` as a small reference line, plus the pure, framework-free extractors it's built on
+  (duck-typed against the partner-API's uniform error envelope, no SDK error-class import needed).
+  Ships with a new `error.requestId` entry in the package's base message catalog
+  (`baseMessagesEn`) — a host merging its own catalog over the base gets the reference-line
+  copy for free, same pattern the `recordForm.*` catalog entries already use.
+
+- **`AuthErrorCode` gains `USER_ALREADY_EXISTS`**, mapped from Cognito's `UsernameExistsException` in
+  `CognitoAuthProvider.signUp`. Previously this fell through to the generic `UNKNOWN` code, which gave
+  a host app no way to distinguish "the email you just typed already has an identity" from any other
+  signup failure. A host app can now dispatch on this specific code to offer a "sign in instead"
+  recovery path rather than a dead-end generic error. Every consuming app's own `auth.errors.*` message
+  catalog needs its own `USER_ALREADY_EXISTS` entry to translate it — the shared `authErrorToMessage`
+  translator falls back to react-intl's own missing-message handling otherwise.
+
+### Changed
+
+- **Scrubbed "partner" framing from a code comment** in the public barrel (`src/index.ts`):
+  "the partner-API token cache" → "the Vectros API token cache". Comment prose only, part of the
+  customer-POV copy scrub for public-mirrored reference-app code (#473).
+
 ## 0.9.0 — 2026-08-27
 
 ### Added

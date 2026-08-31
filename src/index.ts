@@ -3,7 +3,7 @@
 //
 // The shared React toolkit for Vectros reference apps: a provider-agnostic
 // auth adapter (`AuthProviderAdapter`) with a Cognito reference implementation,
-// the partner-API token cache (keyed per tenant + context), MFA enrollment,
+// the Vectros API token cache (keyed per tenant + context), MFA enrollment,
 // the auth/layout UI primitives, and schema-driven record form/list rendering.
 //
 // More surface (UI primitives, IntlProvider, switchers) is re-exported here as
@@ -41,6 +41,15 @@ export { ConfirmDialog } from './components/ConfirmDialog';
 export type { ConfirmDialogProps } from './components/ConfirmDialog';
 export { VersionUpdateBanner } from './components/VersionUpdateBanner';
 export type { VersionUpdateBannerProps } from './components/VersionUpdateBanner';
+export { ApiErrorAlert } from './components/ApiErrorAlert';
+export type { ApiErrorAlertProps } from './components/ApiErrorAlert';
+export { RequestIdCaption } from './components/RequestIdCaption';
+export type { RequestIdCaptionProps } from './components/RequestIdCaption';
+
+// API-error extraction helpers (pure, framework-free) — pair with
+// ApiErrorAlert/RequestIdCaption above, or use standalone for a host's own
+// error handling (e.g. `isVersionConflict` to special-case a 409).
+export { extractErrorMessage, extractRequestId, isVersionConflict, statusCodeOf } from './lib/apiError';
 
 // Schema-driven record UI — typed form inputs + derived list columns from a
 // schema's `FieldDef[]`/`renderHints` (see schema-ui/index.ts for the full
