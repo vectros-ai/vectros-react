@@ -343,11 +343,26 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * self-signup path at all (the server resolves the tenant's sole policy whether or not the client
    * names it) — an explicit self-signup page passing `signupType` hits the identical race an
    * ordinary cache-driven re-mint does, so it stays covered by the retry.
+   *
+   * **`skipOwnRetry` — internal, set ONLY by {@link mintPartnerApiToken}.** This same 403 race is
+   * now ALSO retried one layer up, inside `vectrosApiTokenCache.ts`'s own `getVectrosApiToken`
+   * (`SHARED_MINT_RETRY_DELAY_MS`, added 2026-08-26, five days after this retry) — a
+   * provider-agnostic retry that additionally coalesces every consumer arriving during the delay
+   * window onto ONE shared attempt, which a per-call retry here structurally cannot do. Every
+   * ordinary re-mint (`mintPartnerApiToken`, the cache's only caller) went through BOTH layers
+   * unreconciled: a persistent 403 retried here (2 fetches), THEN again one layer up on the cache's
+   * own retry (2 more fetches) — up to 4 real `POST /v1/auth/token/exchange` calls in quick
+   * succession for one mint, measured live on a fresh sign-in right after invite-accept.
+   * `mintPartnerApiToken` sets this to defer the race ENTIRELY to the cache's shared retry, so the
+   * two layers no longer stack. A direct `exchangeToken()` call that bypasses the cache (self-signup
+   * via `signupType`, `acceptInvite`) leaves this unset and keeps its own retry — nothing else
+   * covers that race for those callers.
    */
   async exchangeToken(options?: {
     readonly inviteToken?: string;
     readonly signupType?: string;
     readonly contextId?: string;
+    readonly skipOwnRetry?: boolean;
   }): Promise<{ readonly token: string; readonly expiresAtMs: number }> {
     let accessToken: string;
     try {
@@ -379,7 +394,7 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
     };
 
     let resp = await attempt();
-    if (resp.status === 403 && !options?.inviteToken) {
+    if (resp.status === 403 && !options?.inviteToken && !options?.skipOwnRetry) {
       await delay(EXCHANGE_RACE_RETRY_DELAY_MS);
       resp = await attempt();
     }
@@ -410,12 +425,17 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * more than one app context, this is how the cache's per-(tenant, context)
    * mint disambiguates which one to target. Omitted/undefined when the
    * issuer serves exactly one — unaffected by this field's addition.
+   *
+   * `skipOwnRetry: true` — this is THE cache-driven path, so the 403-race
+   * retry is left entirely to `vectrosApiTokenCache.ts`'s own shared retry;
+   * see `exchangeToken`'s doc for why stacking both here produced up to 4
+   * real exchange calls for one mint.
    */
   async mintPartnerApiToken(
     _tenantId?: unknown,
     contextId?: string,
   ): Promise<{ readonly token: string; readonly expiresAtMs: number }> {
-    return this.exchangeToken(contextId ? { contextId } : undefined);
+    return this.exchangeToken({ ...(contextId ? { contextId } : {}), skipOwnRetry: true });
   }
 
   /** {@link HostedRedirectAuth.acceptInvite} — a thin `exchangeToken` wrapper that

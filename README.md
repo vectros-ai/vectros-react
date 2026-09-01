@@ -41,6 +41,9 @@ look and behave the same without copy-paste:
 - **Version-update banner** — `VersionUpdateBanner` polls a `version.json`
   manifest and offers a user-initiated refresh when a newer build is deployed,
   so a long-open tab never strands on a stale shell.
+- **Hybrid search UI** — `SearchResultCard` (one hybrid-search hit: source-type chip, title/link,
+  snippet, similarity badge, date — the host resolves a raw SDK `search.content()` result into
+  its flat props) and `SearchModeToggle` (the Hybrid/Semantic/Keyword ranking-mode control).
 
 ## Install
 

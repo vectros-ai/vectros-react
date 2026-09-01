@@ -29,6 +29,11 @@ vi.mock('@auth0/auth0-spa-js', () => ({
 
 import { Auth0AuthProvider } from './auth0';
 import { AuthError } from '../errors';
+import {
+  __resetVectrosApiTokenCacheForTest,
+  getVectrosApiToken,
+  setPartnerApiTokenMinter,
+} from '../vectrosApiTokenCache';
 
 const CONFIG = {
   domain: 'test-tenant.us.auth0.com',
@@ -403,6 +408,46 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
     await expect(provider().exchangeToken()).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
   });
 
+  it('mintPartnerApiToken does NOT retry internally on a 403 — deferred entirely to the cache\'s own shared retry', async () => {
+    // Regression guard: mintPartnerApiToken's exchangeToken({contextId}) call used to retry HERE
+    // (this file's own retry, below) AND, on a persistent failure, AGAIN one layer up in
+    // vectrosApiTokenCache.ts's getVectrosApiToken — up to 4 real POSTs to the exchange endpoint
+    // for one ordinary re-mint. mintPartnerApiToken now passes skipOwnRetry, so exactly ONE fetch
+    // happens here regardless of outcome; see the integration test below for the end-to-end count.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: 'invalid_grant', error_description: 'x' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const err = await provider()
+      .mintPartnerApiToken('tnt_whatever')
+      .catch((e: unknown) => e);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(AuthError);
+  });
+
+  it('a direct exchangeToken() call (bypassing the cache — e.g. self-signup) still retries on its own — nothing else covers that race for it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: 'invalid_grant', error_description: 'x' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = provider()
+      .exchangeToken({ signupType: 'self_serve' })
+      .catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('retries once on a persistent 403 (a genuine rejection, not just the race) and still maps to AuthError', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchMock = vi.fn().mockResolvedValue({
@@ -523,5 +568,61 @@ describe('Auth0AuthProvider.acceptInvite', () => {
     );
 
     await expect(provider().acceptInvite('inv_expired')).rejects.toBeInstanceOf(AuthError);
+  });
+});
+
+describe('Auth0AuthProvider wired into vectrosApiTokenCache — end-to-end double-retry regression', () => {
+  // The real bug: mintPartnerApiToken() is the ONLY caller vectrosApiTokenCache.ts's
+  // getVectrosApiToken ever mints through (main.tsx wires it via
+  // setPartnerApiTokenMinter). A persistent 403 on a fresh sign-in used to retry inside
+  // exchangeToken() (this file, 2 fetches) AND, once that still failed, again inside the
+  // cache's own SHARED_MINT_RETRY_DELAY_MS retry (2 more fetches) — up to 4 real
+  // `POST /v1/auth/token/exchange` calls in quick succession for ONE mint. This test wires
+  // the two REAL modules together (no mock minter) to pin the fixed, non-stacking count.
+  afterEach(() => {
+    __resetVectrosApiTokenCacheForTest();
+    vi.useRealTimers();
+  });
+
+  it('a persistent 403 produces exactly 2 real exchange POSTs total (1 + the cache\'s 1 shared retry), not 4', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: 'invalid_grant', error_description: 'x' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const auth0 = provider();
+    setPartnerApiTokenMinter((tenantId, contextId) => auth0.mintPartnerApiToken(tenantId, contextId));
+
+    const pending = getVectrosApiToken('exchange-resolved').catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it('several near-simultaneous consumers (e.g. one useScopeGate per nav item) on a fresh sign-in share ONE mint end to end, real fetch count included', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ access_token: 'st_live_shared', expires_in: 3600 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const auth0 = provider();
+    setPartnerApiTokenMinter((tenantId, contextId) => auth0.mintPartnerApiToken(tenantId, contextId));
+
+    // Several independent consumers calling in the same synchronous pass, exactly how
+    // several mounted useScopeGate instances (one per gated nav item) behave on mount.
+    const [t1, t2, t3] = await Promise.all([
+      getVectrosApiToken('exchange-resolved'),
+      getVectrosApiToken('exchange-resolved'),
+      getVectrosApiToken('exchange-resolved'),
+    ]);
+
+    expect([t1, t2, t3]).toEqual(['st_live_shared', 'st_live_shared', 'st_live_shared']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

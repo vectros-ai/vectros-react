@@ -45,6 +45,10 @@ export { ApiErrorAlert } from './components/ApiErrorAlert';
 export type { ApiErrorAlertProps } from './components/ApiErrorAlert';
 export { RequestIdCaption } from './components/RequestIdCaption';
 export type { RequestIdCaptionProps } from './components/RequestIdCaption';
+export { SearchModeToggle } from './components/search/SearchModeToggle';
+export type { SearchModeToggleProps, SearchMode } from './components/search/SearchModeToggle';
+export { SearchResultCard } from './components/search/SearchResultCard';
+export type { SearchResultCardProps } from './components/search/SearchResultCard';
 
 // API-error extraction helpers (pure, framework-free) — pair with
 // ApiErrorAlert/RequestIdCaption above, or use standalone for a host's own

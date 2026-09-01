@@ -3,17 +3,34 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.11.0 — 2026-09-01
+
+### Added
+
+- **`SearchResultCard` + `SearchModeToggle`** — presentational primitives for a hybrid-search result
+  list. `SearchResultCard` renders one search hit (source-type chip, title/link, snippet, similarity
+  badge, date) from flat, presentational props — the host resolves a raw SDK `search.content()` result
+  into those props itself, since routing/folder-name resolution stays app-specific. `SearchModeToggle`
+  is the Hybrid/Semantic/Keyword ranking-mode control. Both copy-agnostic (host passes already-localized
+  strings), same convention as `LoadingBlock`/`ApiErrorAlert`.
+
+### Fixed
+
+- **Fixed duplicate token-exchange calls on a fresh Auth0 sign-in.** A cache-driven token mint no
+  longer issues more than one `POST /v1/auth/token/exchange` request when retrying a transient
+  failure. A direct `exchangeToken()` call outside the cache (self-signup, invite-accept) is
+  unaffected.
+
 ## 0.10.0 — 2026-08-30
 
 ### Added
 
 - **`ApiErrorAlert` + `RequestIdCaption`**, plus the `extractErrorMessage`/`extractRequestId`/
-  `statusCodeOf`/`isVersionConflict` API-error helpers they're built on. Promoted from three
-  near-byte-identical per-app copies — a friendly error `Alert` (announces via `role="alert"`,
-  MUI's own `Alert` has no implicit one) that surfaces a failed call's support-correlation
-  `requestId` as a small reference line, plus the pure, framework-free extractors it's built on
-  (duck-typed against the partner-API's uniform error envelope, no SDK error-class import needed).
-  Ships with a new `error.requestId` entry in the package's base message catalog
+  `statusCodeOf`/`isVersionConflict` API-error helpers they're built on. A friendly error `Alert`
+  (announces via `role="alert"`, MUI's own `Alert` has no implicit one) that surfaces a failed
+  call's support-correlation `requestId` as a small reference line, plus the pure, framework-free
+  extractors it's built on (duck-typed against the API's uniform error envelope, no SDK error-class
+  import needed). Ships with a new `error.requestId` entry in the package's base message catalog
   (`baseMessagesEn`) — a host merging its own catalog over the base gets the reference-line
   copy for free, same pattern the `recordForm.*` catalog entries already use.
 
@@ -24,12 +41,6 @@ This project adheres to [Semantic Versioning](https://semver.org).
   recovery path rather than a dead-end generic error. Every consuming app's own `auth.errors.*` message
   catalog needs its own `USER_ALREADY_EXISTS` entry to translate it — the shared `authErrorToMessage`
   translator falls back to react-intl's own missing-message handling otherwise.
-
-### Changed
-
-- **Scrubbed "partner" framing from a code comment** in the public barrel (`src/index.ts`):
-  "the partner-API token cache" → "the Vectros API token cache". Comment prose only, part of the
-  customer-POV copy scrub for public-mirrored reference-app code (#473).
 
 ## 0.9.0 — 2026-08-27
 
@@ -47,9 +58,8 @@ This project adheres to [Semantic Versioning](https://semver.org).
   injection shape; omit it entirely for a tenant/context-only app and the override branch is never
   reached.
 
-- **Schema-driven record UI** (`schema-ui`) — promoted from `app.vectros.ai`, where this rendering
-  stack was already real, working, and unit-tested. A schema's `FieldDef[]` + `renderHints` drive
-  typed form inputs and derived table columns generically, so a host app builds its own record
+- **Schema-driven record UI** (`schema-ui`) — a schema's `FieldDef[]` + `renderHints` drive typed
+  form inputs and derived table columns generically, so a host app builds its own record
   editor/list page around these primitives instead of hand-rolling one per record type:
   - **`RecordFormFields`** — renders a typed input per schema field (string/number/boolean/date/enum),
     reporting edits via `onChange`; complex types and schema-undescribed payload keys are listed as a
@@ -68,8 +78,7 @@ This project adheres to [Semantic Versioning](https://semver.org).
   API wrapper — no new dependency category (the package already declared `@mui/material`/
   `@mui/icons-material` as peer deps).
 
-- **Streaming inference state** (`useInferenceStream`/`reduceInferenceEvent`) — promoted from
-  `app.vectros.ai`, the same code-reuse story as the schema-driven record UI above. Folds the SSE
+- **Streaming inference state** (`useInferenceStream`/`reduceInferenceEvent`) — folds the SSE
   event stream any of the three inference endpoints (`chat`/`rag`/`documentAsk`) return into one flat
   render state (`InferenceStreamState`) via a pure, independently-testable reducer
   (`reduceInferenceEvent`) plus a thin React hook (`useInferenceStream`) that drives the async
@@ -77,23 +86,16 @@ This project adheres to [Semantic Versioning](https://semver.org).
   never apply), and exposes `run`/`cancel`/`reset`. Endpoint-agnostic — the caller supplies the SDK
   call as a runner thunk, so the same hook serves chat, RAG, and document-ask alike.
 
-- **Repinned to `@vectros-ai/sdk` 0.41.0.** No API surface this package uses changed shape — the
-  schema-driven record UI above already re-sources its types from the SDK's `Vectros` namespace, and
-  neither the new issuer-update endpoint nor the new `roleIds` access-profile field is consumed here;
-  see the [SDK changelog](https://github.com/vectros-ai/sdk/blob/main/CHANGELOG.md) for the full
-  release.
+- **Repinned to `@vectros-ai/sdk` 0.41.0.** No API surface this package uses changed shape; see the
+  [SDK changelog](https://github.com/vectros-ai/sdk/blob/main/CHANGELOG.md) for the full release.
 
 ### Changed — breaking
 
 - **`HostedRedirectAuth` gains a third required method, `acceptInvite(inviteToken)`** — alongside the
   existing `signInWithRedirect`/`handleRedirectCallback`. Backed by `Auth0AuthProvider.exchangeToken({
-  inviteToken })`: call it once, from an app's own accept-invite route, right after
+  inviteToken })`: call it once, from your app's own accept-invite route, right after
   `handleRedirectCallback()` has established a session — it performs the server-side bind that
-  transitions a first-time signer from PENDING to ACTIVE. Previously `exchangeToken`'s `inviteToken`
-  option existed but had no path through `useAuth()` at all — an invite-only app had no way to
-  complete a first-login invite acceptance without reaching into the concrete provider directly,
-  defeating the provider-agnostic `useAuth()` contract every other hosted-redirect call site relies
-  on.
+  transitions a first-time signer from PENDING to ACTIVE.
 
   **Migration for a `HostedRedirectAuth` implementer:** add an `acceptInvite(inviteToken: string):
   Promise<void>` method that presents the invite token to your own token-exchange endpoint (see
@@ -102,47 +104,23 @@ This project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
-- **`Auth0AuthProvider.exchangeToken` now retries once on a `403`.** The exchange endpoint
-  deliberately returns the same generic `403 invalid_grant` for several distinct server-side
-  rejections (uniform-not-found discipline), and this client has no way to tell them apart — but
-  one of those causes is genuinely transient: two near-simultaneous first-time exchanges for the
-  SAME brand-new identity race each other server-side, and the loser gets this exact 403 even
-  though the identity now exists and an immediate retry would match it directly. Observed live via
-  a real Auth0-hosted sign-in: a client-side double-fire (easiest to trigger under React
-  `StrictMode`'s double-mount, though the underlying hazard isn't StrictMode-specific) raced a
-  brand-new identity's self-signup, and the loser surfaced as a hard, un-retried failure on the
-  very first sign-in a real user would ever see. A single bounded retry after a short delay costs
-  one harmless extra round-trip on every OTHER cause of a 403 (those fail again identically) and
-  silently clears the benign one. **Scoped narrower after independent review**: the retry is
-  skipped when `inviteToken` is set — the server never runs the self-signup path (where the race
-  lives) for an invite attempt, so a 403 there is always a real rejection, and retrying only adds
-  load to an endpoint with no rate limiter of its own for zero benefit.
+- **`Auth0AuthProvider.exchangeToken` now retries once on a `403`.** A first-time sign-in could
+  occasionally fail immediately with a hard, unrecoverable error even though the account was
+  valid, caused by a benign server-side race on a brand-new identity's very first token exchange.
+  The client now retries once after a short delay, which resolves the race silently; any other
+  cause of a `403` still fails as before. The retry is skipped when `inviteToken` is set, since an
+  invite-accept exchange never hits this race.
 
-- **`Auth0AuthProvider.exchangeToken` now presents the access token, not the ID token.** The
-  token-exchange endpoint requires the presented token's `aud` claim to equal the audience
-  registered for the issuer — an ID token's `aud` is always the requesting client id (OIDC spec,
-  not an Auth0-specific behavior), so it could never satisfy that check. The access token, minted
-  against the configured `authorizationParams.audience`, carries the right audience and is now
-  what gets sent, labeled as a generic JWT (`...token-type:jwt`) rather than `...token-type:id_token`.
+- **`Auth0AuthProvider.exchangeToken` now presents the access token, not the ID token.** Token
+  exchange was failing for every Auth0-based sign-in: the client was presenting the ID token,
+  whose `aud` claim can never match the audience the exchange endpoint requires. It now presents
+  the access token, which carries the right audience.
 
-- **`getVectrosApiToken` could permanently poison a (tenant, context) cache slot** if the very
-  first call for that slot happened before `setPartnerApiTokenMinter` had registered a minter —
-  a real, reachable ordering, not just a hypothetical one: any gated component whose mount
-  triggers a mint (e.g. a `ScopeGate`-wrapped nav item) can render before app boot's minter
-  registration has run, and every test that renders such a component without registering a
-  mock minter first hits it too. The in-flight promise's self-referential cleanup guard
-  (`inFlightMints.get(key) === mintPromise`) compared against the OUTER `mintPromise` variable —
-  but a mint that rejects with no `await` before the throw (exactly the "minter not registered"
-  case) ran its entire `try`/`finally` synchronously, before that outer variable (and the
-  `inFlightMints.set` call after it) had even been assigned. The guard always read false, never
-  deleted, and the map ended up holding an already-rejected, already-finalized promise that
-  nothing would ever clean up again — every later caller for that slot joined the same dead
-  promise forever, even after a minter registered correctly moments later. Fixed with an
-  unconditional microtask yield at the top of the mint, guaranteeing the assignment and the
-  map-set always complete before the mint's own body can possibly reach its `finally`. This
-  module had no dedicated test before this fix; `vectrosApiTokenCache.test.ts` now covers the
-  regression directly plus the cache-hit, coalescing, clear-during-mint, and retry-after-failure
-  behaviors around it.
+- **Fixed a bug where a token mint attempted before `setPartnerApiTokenMinter` had registered a
+  minter could permanently break all later token requests for that (tenant, context).** Every
+  subsequent caller would hang forever instead of getting a token, even after a minter registered
+  correctly moments later. This was reachable in normal use — for example a gated nav item
+  mounting before app boot finished registering the minter — not just a theoretical edge case.
 
 - **`useScopeGate`/`RequireScope` now correctly resolve permissions from a compressed `scope` claim.**
   The platform mints the `st_*` token's `scope` claim DEFLATE-compressed against a shared preset
@@ -154,41 +132,27 @@ This project adheres to [Semantic Versioning](https://semver.org).
 - **`ScopeGate`/`RequireScope`/`AppLayout` gain an optional tenant override, for a single-tenant host
   with no `CurrentTenantProvider` in its tree** (`ScopeGateProps.tenantOverride` /
   `RequireScopeProps.tenantOverride` / `AppLayoutProps.scopeGateTenant`, the last threading down into
-  every gated nav item's own `ScopeGate`). Both gates default to reading the active tenant from
-  `useCurrentTenant()`, which is exactly right for a multi-tenant host — but `useCurrentTenant()` falls
-  back to `tenant: null` with no provider in the tree, and the underlying `useScopeGate()` call's mint
-  effect never fires for a null tenant, so `loading` never resolves. Left unfixed, that's not merely
-  slow: it's a permanent, silent failure — a gated nav item never appears and a gated route never
-  renders its content OR redirects, with no error anywhere. Supplying a stable, app-wide tenant-key
-  string closes the gap; a single-tenant exchange-based auth provider ignores the value entirely (it
-  exists only as a cache key), so any non-empty constant works. Fully backward compatible — omitting
-  the new props preserves the existing multi-tenant behavior unchanged.
+  every gated nav item's own `ScopeGate`). Without a `CurrentTenantProvider`, a gated nav item or
+  route would silently never resolve — no content, no redirect, no error. Supplying a stable,
+  app-wide tenant-key string fixes this; a single-tenant exchange-based auth provider ignores the
+  value entirely (it exists only as a cache key), so any non-empty constant works. Fully backward
+  compatible — omitting the new props preserves the existing multi-tenant behavior unchanged.
 
-- **`canPerform` never unioned ops for a QUALIFIED action ask.** A caller checking a 3-segment ask
-  (e.g. `records:r:case`) against a token whose clause held a combined-ops grant on the same
-  resource+qualifier (e.g. `records:crud:case`) fell straight to exact-string match, since the
-  existing ops-union logic only ever applied to the 2-segment unqualified shape — so a genuinely
-  granted qualified permission stayed silently denied, hiding gated nav items/routes the token
-  actually authorized. The union now also applies to entries sharing both the resource and the exact
-  qualifier; a qualified grant still never leaks into a different qualifier, and an unqualified grant
-  still never satisfies a qualified ask.
+- **`canPerform` now recognizes a combined-ops grant for a qualified action ask.** A caller holding
+  a combined grant like `records:crud:case` was incorrectly denied a qualified ask like
+  `records:r:case`, hiding gated nav items/routes the token actually authorized. Fixed; an
+  unqualified grant still never satisfies a qualified ask, and a qualified grant still never leaks
+  into a different qualifier.
 - **Auth0's unverified-email login rejection now maps to a real `AuthErrorCode` instead of `UNKNOWN`.**
-  Auth0's default behavior for a database connection requiring email verification rejects the login
-  itself (`error=unauthorized`, a "please verify your email" description) rather than issuing a
-  session; `handleRedirectCallback()`'s throw previously fell through to the generic `UNKNOWN` code,
-  showing a static "something went wrong" with no indication a verification email had been sent. Adds
-  a new `EMAIL_NOT_VERIFIED` code, detected by pattern (tenants customize the exact message) and kept
-  deliberately separate from the Cognito-shaped `USER_NOT_CONFIRMED` (which expects a code, not a
-  link).
-- **A failed token mint right after invite-accept could produce several redundant `/token/exchange`
-  calls for one page load instead of one retried attempt.** Independent `useScopeGate` consumers
-  mounting around the same moment (separate nav items, each resolving their own gate) each raced a
-  fresh mint the instant a predecessor's failure cleared the shared in-flight slot, rather than
-  joining a single retry. The one-shot delayed retry now lives inside
-  `vectrosApiTokenCache.getVectrosApiToken` itself as part of the same in-flight promise for the
-  cache slot, so every caller arriving during the attempt/delay/retry window shares it. A
-  "not configured yet" (minter/assumer unregistered) failure is not retried, since it can't self-heal
-  on this timescale — only a genuine mint-attempt rejection is.
+  A database-connection login requiring email verification previously showed a generic "something
+  went wrong" with no indication a verification email had been sent. Adds a new
+  `EMAIL_NOT_VERIFIED` code, kept deliberately separate from the Cognito-shaped `USER_NOT_CONFIRMED`
+  (which expects a code, not a link).
+- **Fixed several redundant `/token/exchange` calls firing for one page load after a failed token
+  mint right after invite-accept.** Independent `useScopeGate` consumers mounting around the same
+  moment (separate nav items) each raced a fresh mint instead of joining a single retry. The
+  one-shot delayed retry now lives inside the shared cache slot, so every caller arriving during
+  the attempt/delay/retry window shares it.
 
 ## 0.8.0 — 2026-08-19
 
