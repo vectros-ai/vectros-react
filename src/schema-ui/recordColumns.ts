@@ -56,6 +56,30 @@ export interface RecordColumn {
   readonly fieldType: string;
   /** Whether the field is flagged filterable (drives the filter affordance). */
   readonly filterable: boolean;
+  /**
+   * Whether the field is flagged `inline` — kept on the record row when the
+   * payload is stored out of line (a large record, or a large-payload storage
+   * profile).
+   *
+   * **Why a list view cares.** A read that does not ask for the payload returns
+   * only what the row itself carries, so a column derived from a payload-only
+   * field has nothing to show — not for some rows, for every row — and neither
+   * the schema nor the response says why. Flagging the field `inline` is what
+   * puts it back.
+   *
+   * Reported, not acted on: this does not drop the column, because whether to
+   * hide it, render it empty, or read payloads instead depends on how the host
+   * lists. A list that always includes payloads can ignore this entirely.
+   *
+   * **`false` here does NOT mean "absent from a payload-less row."** Two other
+   * declarations also keep a field on the row — `filterable` (above) and being
+   * one of the schema's lookup fields — and a lookup field is not visible from
+   * a `FieldDef` at all: `lookupFields` is a sibling collection on the schema,
+   * which this derivation is not given. A host that needs the whole question
+   * answered unions this flag with `filterable` and its own schema's lookup
+   * field ids.
+   */
+  readonly inline: boolean;
 }
 
 /**
@@ -82,6 +106,7 @@ export function deriveValueColumns(
       label: fieldLabel(field, hints),
       fieldType: field.fieldType,
       filterable: field.filterable === true,
+      inline: field.inline === true,
     }));
 }
 

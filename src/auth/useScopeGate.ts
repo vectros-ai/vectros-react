@@ -2,27 +2,40 @@
 // useScopeGate — data-driven UI gating from the session's token scope.
 //
 // Surfaces (nav items, action buttons, etc.) should render conditionally on
-// whether the signed-in user actually has permission for them. This hook reads
-// the allowed actions from the cached Vectros-API st_* token and exposes a
-// `can(action)` predicate the UI uses to gate.
+// whether the signed-in user actually has permission for them. This hook
+// reads the allowed actions + identity from the mint response's resolved
+// scope and exposes a `can(action)` predicate the UI uses to gate.
 //
-// **Where the scope comes from:** the scoped-token endpoint mints st_* tokens
-// whose claims carry a `scope.scopes[]` list. Each clause has an
-// `allowed_actions` string array; the hook unions them:
-//   - owner    → a single clause `["*"]` (wildcard — grants everything)
-//   - scoped   → clauses carrying the user's specific allowed actions
+// **Where the scope comes from.** Every mint/exchange/assume endpoint resolves
+// `allowedActions`/`identity` server-side from the SAME plaintext scope data
+// that gets compressed into the token's own `scope` claim, and returns it
+// alongside the token. `useScopeGate` reads that field via
+// `getVectrosResolvedScope` (vectrosApiTokenCache.ts) — it never decodes the
+// token itself.
 //
-// We decode the token client-side (NO signature verification — that's the
-// server's job at request time). This is safe because the worst-case
-// adversarial scenario (token forgery) only fools the UI into showing
-// extra surface; the backend will reject the actual API call.
+// **This replaces a client-side JWT/compressed-`scope`-claim decode this file
+// used to do.** That approach required a SECOND-LANGUAGE decoder for the
+// platform's compressed `scope` claim — a duplicated preset DEFLATE
+// dictionary in this package that could silently drift from the backend's
+// own copy. The backend now resolves the SAME plaintext data it's about to
+// compress and hands the plaintext back directly, so there's nothing left to
+// decode (or drift) on this side.
 //
-// **Why JWT-decode rather than a `/developer/me` endpoint:** ships smaller.
-// Doesn't add backend surface. A future backend adapter introduces
-// `AuthProviderAdapter.getActiveTenant() / getMemberships()` which becomes
-// the authoritative source; useScopeGate refactors then to read from
-// memberships. For now the JWT-claim path is sufficient and the refactor
-// is mechanical.
+// **No signature verification on the resolved scope either** — same as the
+// old client-side decode: the backend re-verifies scope on every real
+// request, so a client-visible value (however it arrives) is a UX
+// optimization only. Nothing gated here is a security boundary; a tampered
+// value buys a rendered button and a refusal from the API behind it.
+//
+// **What this hook CAN get wrong, in both directions.** An earlier version of
+// this note claimed the worst case was showing surface the API then rejects,
+// "never the reverse". That is not true and the reverse is the likelier half:
+// `canPerform` answers conservatively wherever it cannot prove a grant, so it
+// can HIDE surface the caller is in fact entitled to — an unqualified grant
+// does not satisfy a qualified ask, and the platform's own authorizer is wider
+// there. Neither direction is a security defect; both are UX ones, and the
+// hiding direction is the one that reaches a user as "the app is broken"
+// rather than as an error message. See {@link canPerform}.
 //
 // **Tenant scope:** the hook reads the active tenant from `useCurrentTenant()`
 // (the TenantSwitcher-controlled tenant) by default; an optional
@@ -36,8 +49,8 @@
 
 import { useEffect, useState } from 'react';
 
-import { decompressScopeClaim } from './scopeCompression';
-import { getVectrosApiToken } from './vectrosApiTokenCache';
+import type { PartnerApiResolvedScope } from './vectrosApiTokenCache';
+import { getVectrosResolvedScope } from './vectrosApiTokenCache';
 import type { TenantId } from './types';
 import { useCurrentTenant } from './useCurrentTenant';
 
@@ -45,15 +58,20 @@ import { useCurrentTenant } from './useCurrentTenant';
 export interface ScopeGateValue {
   /** True until the first token mint resolves. UIs typically render nothing during loading. */
   readonly loading: boolean;
-  /** The decoded allowed_actions claim. Empty array if the token had no claim or decode failed. */
+  /** The resolved `allowedActions`. Empty array if the mint response had none, or while loading. */
   readonly allowedActions: ReadonlyArray<string>;
   /**
-   * The decoded `scope.identity` claim — the ownership dimensions (canonical
-   * `scope:<ns>` keys) THIS session's own credential holds, if any. Empty
-   * object for a credential with none (an OWNER session, which is never
-   * bound to a specific identity — the claim is omitted from the token
-   * entirely) or while loading. See {@link decodeIdentity} for the exact
-   * semantics and why this answers a different question than `can(action)`.
+   * The resolved `identity` — the ownership dimensions (canonical `scope:<ns>`
+   * keys, plus `userId` when the credential is bound to a specific user) THIS
+   * session's own credential holds, if any. Empty object for a credential
+   * with none (an OWNER session, which is never bound to a specific identity)
+   * or while loading. This is NOT the same question as `can(action)` —
+   * holding an identity value doesn't grant an action, and holding an action
+   * doesn't confer an identity. It answers a narrower question some surfaces
+   * need: "does this session's own credential hold an identity value it
+   * could legitimately confer onto something else?" (see the platform's
+   * identity-conferral rule — a caller may grant exactly the identity value
+   * it itself holds, never an arbitrary one).
    */
   readonly identity: Readonly<Record<string, string>>;
   /**
@@ -70,12 +88,40 @@ export interface ScopeGateValue {
   readonly can: (action: string) => boolean;
 }
 
-/** The letters the platform's compact `resource:ops[:qualifier]` grammar recognizes. */
-const CRUDS_LETTERS = 'cruds';
+/**
+ * The op letters the platform's compact `resource:ops[:qualifier]` grammar
+ * recognizes: `c`/`r`/`u`/`d` (create/read/update/delete), `s` (sensitive-field
+ * reveal) and `x` (execute a stored script).
+ *
+ * **This is a MIRROR of a catalog the platform owns, and it can only ever
+ * follow.** The set is decided by the API's own authoring validator, which this
+ * package cannot see. The nearest OBSERVABLE statement of it is the SDK's
+ * published contract — the `allowed_actions` description on `ScopeClause` —
+ * which is itself a prose copy of that decision and can lag it. So agreeing
+ * with the SDK is the strongest check available here, and it is not the same
+ * thing as being right.
+ *
+ * **A letter the platform adds and this list lacks does not fail cleanly**,
+ * which is why it is worth a guard rather than a note. An ops segment carrying
+ * an unknown letter stops being recognized as an ops string AT ALL, so both the
+ * grant and the ask drop out of the ops-union path below and into the
+ * exact-match fallback. That degrades quietly and asymmetrically: a grant
+ * spelled character-for-character like the ask still matches — the simplest
+ * case, and the one a developer checks first — while every other spelling of
+ * the same permission starts answering `false`, INCLUDING asks for unrelated
+ * letters on a resource whose grant merely mentions the unknown one.
+ *
+ * `scopeGrammar.sdkContract.test.ts` is that guard: it reads the letters and
+ * the worked examples out of the installed SDK's own `allowed_actions`
+ * description and fails when this list cannot parse them. A test that pinned
+ * this constant against a copy of itself would cover one side of a
+ * two-language catalog while reading as proof of both.
+ */
+export const OPS_LETTERS = 'crudsx';
 
-/** True when every character of `s` is a recognized ops letter, and `s` is non-empty. */
-function isOpsString(s: string): boolean {
-  return s.length > 0 && [...s].every((c) => CRUDS_LETTERS.includes(c));
+/** True when every character of `s` is a recognized op letter, and `s` is non-empty. */
+export function isOpsString(s: string): boolean {
+  return s.length > 0 && [...s].every((c) => OPS_LETTERS.includes(c));
 }
 
 /**
@@ -104,6 +150,35 @@ function isOpsString(s: string): boolean {
  *   still never contributes to a qualified ask either (seen only via the exact-match
  *   fallback below, unchanged) — both keep the conservative, never-wider-than-what's-
  *   granted property the unqualified case already has.
+ *
+ *   What a qualifier MEANS is the platform's rule, not this predicate's: which
+ *   resources correlate a qualifier, and on which op letters, is decided by the API at
+ *   authoring time (the SDK's `allowed_actions` description states the current set),
+ *   and this predicate only compares qualifier segments for equality. Two consequences
+ *   are worth knowing before writing an ask. An entry whose qualifier the platform
+ *   would refuse to author can never reach a resolved scope, so asking for one gets
+ *   nothing out of the union path — though a wildcard-scoped session still answers
+ *   `true` to any ask at all, short-circuiting above. And a BARE grant that covers every
+ *   instance — `scripts:x`, meaning every script — does NOT satisfy a per-instance ask
+ *   like `scripts:x:daily-report`, because an unqualified grant never feeds a qualified
+ *   ask; the API itself is wider here and would allow the call. Gate a "can execute
+ *   scripts at all" surface on the bare form — unless your credentials carry per-script
+ *   grants, because the mirror image is also true and also narrower than the API: a
+ *   credential holding only `scripts:x:daily-report` answers `false` to a bare
+ *   `scripts:x` ask, so gating the surface on the bare form alone would hide it from
+ *   exactly the caller the per-script grant was issued for. Where both shapes are in
+ *   play, ask for both and accept either.
+ *
+ *   Both narrowings are the same property seen from two sides: this predicate never
+ *   generalizes across the qualifier boundary, in either direction. The safety of NOT
+ *   modelling the platform's per-resource qualifier rules rests on an invariant it
+ *   cannot check — that the API refuses to author a qualifier it would not enforce, so
+ *   an entry whose qualifier is meaningless never reaches a resolved scope in the first
+ *   place.
+ *
+ *   One shape this predicate does not reach at all: a qualifier that itself contains a
+ *   colon. The ask is split unbounded, so such an action yields more than three segments
+ *   and drops straight to exact matching, whatever the platform would make of it.
  * - anything else (a bare custom verb, an ask/grant whose ops segment isn't a
  *   recognized ops string, or a length mismatch between ask and grant) — falls back to
  *   an EXACT string match against `allowedActions`. This is deliberate, not an
@@ -145,150 +220,9 @@ export function canPerform(
   return allowedActions.includes(action);
 }
 
-/** What both public decode functions below extract from one token. */
-interface DecodedScopeClaims {
-  readonly allowedActions: ReadonlyArray<string>;
-  readonly identity: Readonly<Record<string, string>>;
-}
-
 const EMPTY_ACTIONS: ReadonlyArray<string> = [];
 const EMPTY_IDENTITY: Readonly<Record<string, string>> = {};
-const EMPTY_CLAIMS: DecodedScopeClaims = { allowedActions: EMPTY_ACTIONS, identity: EMPTY_IDENTITY };
-
-// Module-level decode cache keyed by raw token string. Avoids re-decoding
-// (and re-parsing the same JWT payload twice, once per claim) on every render
-// across multiple useScopeGate consumers.
-const decodedByToken = new Map<string, DecodedScopeClaims>();
-
-/**
- * Decode an st_*-shaped JWT's `scope` claim once, extracting both facets
- * `decodeAllowedActions`/`decodeIdentity` read. Not exported — those two
- * remain the public, independently-cacheable surface (mirrors how they were
- * two separate functions before `identity` existed, so existing callers of
- * `decodeAllowedActions` are unaffected).
- *
- * Token shape: `st_<base64url-header>.<base64url-payload>.<base64url-sig>` —
- * the platform mints tokens as `"st_" + jwt`, with no `live`/`test` env infix
- * despite what an older comment here claimed. (Some callers may pass the
- * bare JWT without the `st_` prefix — we handle both; the payload segment's
- * INDEX is unaffected either way, since the prefix has no `.` in it.)
- *
- * **The `scope` claim itself is DEFLATE-compressed + base64url-encoded** —
- * see `scopeCompression.ts`'s file header for the full story (including the
- * dictionary-drift risk this decode carries) and for the decompression this
- * is the inverse of. Decompression failure (corrupt data, or a dictionary
- * that's drifted out of sync with the platform's) is handled the same as
- * any other malformed-token case below: empty claims, no throw.
- *
- * **No signature verification.** The backend re-verifies on every request, and
- * client-side scope is a UX optimization only. Forged claims widen the visible
- * UI surface but don't unlock API calls.
- */
-function decodeScopeClaims(token: string): DecodedScopeClaims {
-  const cached = decodedByToken.get(token);
-  if (cached) return cached;
-
-  // Strip the st_ prefix if present.
-  const stripped = token.replace(/^st_/, '');
-  const parts = stripped.split('.');
-  if (parts.length !== 3) {
-    decodedByToken.set(token, EMPTY_CLAIMS);
-    return EMPTY_CLAIMS;
-  }
-  try {
-    // base64url → standard base64 + padding.
-    const payloadSegment = parts[1] ?? '';
-    const standard = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
-    const padding = (4 - (standard.length % 4)) % 4;
-    const padded = standard + '='.repeat(padding);
-    const json = atob(padded);
-    const claims = JSON.parse(json) as { scope?: unknown };
-
-    // `scope` is a compressed opaque string on every real token — decompress
-    // it back into the `{scopes, identity}` shape below. A plain object is
-    // also accepted (test fixtures, and a defensive
-    // hedge against any future rollback of the compression change) so this
-    // decode doesn't itself become a second thing to keep in lockstep with a
-    // wire-format change.
-    let scopeClaims: { scopes?: ReadonlyArray<{ allowed_actions?: unknown }>; identity?: unknown } | undefined;
-    if (typeof claims.scope === 'string') {
-      scopeClaims = JSON.parse(decompressScopeClaim(claims.scope)) as typeof scopeClaims;
-    } else if (claims.scope != null && typeof claims.scope === 'object') {
-      scopeClaims = claims.scope as typeof scopeClaims;
-    }
-
-    const clauses = scopeClaims?.scopes;
-    let allowedActions = EMPTY_ACTIONS;
-    if (Array.isArray(clauses)) {
-      const actions = new Set<string>();
-      for (const clause of clauses) {
-        const list = clause?.allowed_actions;
-        if (Array.isArray(list)) {
-          for (const a of list) if (typeof a === 'string') actions.add(a);
-        }
-      }
-      allowedActions = [...actions];
-    }
-
-    // `scope.identity` — the ownership dimensions THIS session's own
-    // credential holds (canonical `scope:<ns>` keys, e.g. `scope:org`; plus
-    // `partnerUserId` when the token is bound to a specific user). Omitted
-    // entirely on the wire for a credential with none (an OWNER session) —
-    // never present as an empty object, but we treat both the same way here.
-    const rawIdentity = scopeClaims?.identity;
-    let identity = EMPTY_IDENTITY;
-    if (rawIdentity != null && typeof rawIdentity === 'object' && !Array.isArray(rawIdentity)) {
-      const result: Record<string, string> = {};
-      for (const [k, v] of Object.entries(rawIdentity as Record<string, unknown>)) {
-        if (typeof v === 'string') result[k] = v;
-      }
-      identity = result;
-    }
-
-    const decoded: DecodedScopeClaims = { allowedActions, identity };
-    decodedByToken.set(token, decoded);
-    return decoded;
-  } catch {
-    decodedByToken.set(token, EMPTY_CLAIMS);
-    return EMPTY_CLAIMS;
-  }
-}
-
-/**
- * Decode an st_*-shaped JWT and extract the union of allowed actions across
- * its scope clauses (`scope.scopes[].allowed_actions`). An owner's token is a
- * single clause `["*"]`; a scoped user's clauses carry their profile's
- * specific actions. We union the actions across every clause.
- *
- * **No signature verification** — see {@link decodeIdentity}'s doc for why
- * that's safe here.
- */
-export function decodeAllowedActions(token: string): ReadonlyArray<string> {
-  return decodeScopeClaims(token).allowedActions;
-}
-
-/**
- * Decode an st_*-shaped JWT and extract the `scope.identity` claim — the
- * ownership dimensions (canonical `scope:<ns>` keys) THIS session's own
- * credential holds, if any. Empty object for a credential with none (an
- * OWNER session is never bound to a specific identity; the claim is omitted
- * from the token entirely in that case).
- *
- * This is NOT the same question as `can(action)` — holding an identity value
- * doesn't grant an action, and holding an action doesn't confer an identity.
- * It answers a narrower question some surfaces need: "does this session's own
- * credential hold an identity value it could legitimately confer onto
- * something else?" (see the platform's identity-conferral rule — a caller may
- * grant exactly the identity value it itself holds, never an arbitrary one).
- *
- * **No signature verification.** The backend re-verifies on every request,
- * and reading this client-side is a UX optimization only, same as
- * `decodeAllowedActions` — forged claims could only make the UI wrongly show
- * an affordance that then fails server-side, never grant anything.
- */
-export function decodeIdentity(token: string): Readonly<Record<string, string>> {
-  return decodeScopeClaims(token).identity;
-}
+const EMPTY_RESOLVED: PartnerApiResolvedScope = { allowedActions: EMPTY_ACTIONS, identity: EMPTY_IDENTITY };
 
 /**
  * Read the current session's allowed actions and expose a can-do predicate.
@@ -306,7 +240,7 @@ export function decodeIdentity(token: string): Readonly<Record<string, string>> 
 export function useScopeGate(tenantOverride?: TenantId): ScopeGateValue {
   const { tenant } = useCurrentTenant();
   const tenantId = tenantOverride ?? tenant;
-  const [decoded, setDecoded] = useState<DecodedScopeClaims | null>(null);
+  const [resolved, setResolved] = useState<PartnerApiResolvedScope | null>(null);
 
   useEffect(() => {
     // No active tenant yet (memberships still loading) — stay in the loading
@@ -316,51 +250,42 @@ export function useScopeGate(tenantOverride?: TenantId): ScopeGateValue {
     // Reset to loading on a tenant change so `can()`/`identity` don't report
     // the PRIOR tenant's claims during the re-mint — otherwise a scoped user
     // switching tenants briefly gates routes on the old tenant's scope.
-    setDecoded(null);
+    setResolved(null);
 
     // The retry-on-a-failed-mint logic used to live here, per hook instance.
     // Moved DOWN into vectrosApiTokenCache.ts's getVectrosApiToken itself
     // (2026-08-26) — several independent consumers (this hook, on nav items
-    // for different actions) each call getVectrosApiToken around the same
-    // moment, and a per-instance retry here couldn't stop each one from
-    // independently racing its OWN fresh mint the instant its predecessor's
-    // failure cleared the shared slot. Retrying inside the cache's own
-    // in-flight promise means every consumer arriving during the retry
-    // window joins the SAME attempt instead of starting an independent one.
-    // See that module's SHARED_MINT_RETRY_DELAY_MS doc for the full story.
-    getVectrosApiToken(tenantId)
-      .then((token) => {
-        if (!cancelled) setDecoded(decodeScopeClaims(token));
+    // for different actions) each call getVectrosApiToken (and
+    // getVectrosResolvedScope, which delegates to it) around the same moment,
+    // and a per-instance retry here couldn't stop each one from independently
+    // racing its OWN fresh mint the instant its predecessor's failure cleared
+    // the shared slot. Retrying inside the cache's own in-flight promise means
+    // every consumer arriving during the retry window joins the SAME attempt
+    // instead of starting an independent one. See that module's
+    // SHARED_MINT_RETRY_DELAY_MS doc for the full story.
+    getVectrosResolvedScope(tenantId)
+      .then((scope) => {
+        if (!cancelled) setResolved(scope ?? EMPTY_RESOLVED);
       })
       .catch(() => {
         // Mint failure (network, expired session, etc.) → treat as no
         // actions/identity. The UI hides everything until the user retries
         // or signs out + back in. Clean degraded mode.
-        if (!cancelled) setDecoded(EMPTY_CLAIMS);
+        if (!cancelled) setResolved(EMPTY_RESOLVED);
       });
     return (): void => {
       cancelled = true;
     };
   }, [tenantId]);
 
-  const allowed = decoded?.allowedActions ?? EMPTY_ACTIONS;
-  const identity = decoded?.identity ?? EMPTY_IDENTITY;
+  const allowed = resolved?.allowedActions ?? EMPTY_ACTIONS;
+  const identity = resolved?.identity ?? EMPTY_IDENTITY;
   const can = (action: string): boolean => canPerform(allowed, action);
 
   return {
-    loading: decoded === null,
+    loading: resolved === null,
     allowedActions: allowed,
     identity,
     can,
   };
-}
-
-/**
- * Test-only helper. Clears the module-level decode cache so each test starts
- * from a clean slate. Exported from the barrel for consuming apps' test suites;
- * runtime-safe (clear-only — it cannot affect scope decisions, which the backend
- * re-verifies on every request).
- */
-export function __resetScopeGateDecodeCacheForTest(): void {
-  decodedByToken.clear();
 }

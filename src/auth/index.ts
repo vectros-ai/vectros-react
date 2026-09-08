@@ -50,11 +50,13 @@ export type { Auth0AuthProvider, Auth0AuthProviderConfig } from './providers/aut
 
 export {
   getVectrosApiToken,
+  getVectrosResolvedScope,
   clearVectrosApiTokenCache,
   setPartnerApiTokenMinter,
   setPartnerApiTokenAssumer,
 } from './vectrosApiTokenCache';
 export type {
+  PartnerApiResolvedScope,
   PartnerApiTokenMinter,
   PartnerApiTokenAssumer,
   VectrosIdentityOverride,
@@ -66,13 +68,6 @@ export type {
 // auth or scope checks (the backend re-verifies every request). A future minor
 // may move these behind a `@vectros-ai/react/test` subpath export.
 export { __resetVectrosApiTokenCacheForTest } from './vectrosApiTokenCache';
-export { __resetScopeGateDecodeCacheForTest } from './useScopeGate';
-// Mints a `scope` claim in the real wire shape (raw-DEFLATE-compressed against the
-// platform's preset dictionary) instead of a plain object a real backend never
-// sends — a consuming app's own test suite should build tokens with this, not a
-// flat/plain-object fixture, or its tests exercise only decodeScopeClaims's
-// defensive fallback and never the real compressed-decode path. See `scopeCompression.ts`.
-export { compressScopeClaim as __compressScopeClaimForTest } from './scopeCompression';
 
 export type {
   AppContextSummary,

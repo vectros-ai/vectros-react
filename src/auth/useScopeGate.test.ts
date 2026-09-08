@@ -1,233 +1,25 @@
 // ---------------------------------------------------------------------------
-// useScopeGate decode — direct unit coverage of decodeAllowedActions.
+// useScopeGate tests.
 //
-// This is the logic the whole client-side scope gate rests on: it reads the
-// allowed actions out of the minted st_* token. The wire-carried `scope`
-// claim is DEFLATE-compressed + base64url-encoded (see `scopeCompression.ts`);
-// `makeToken` below compresses its `scope` payload with `pako`, matching what
-// a real backend-minted token actually carries — building it as a plain
-// object instead would test code the decoder no longer runs on the real
-// path and let a decode-shape regression pass green.
+// canPerform is the ops-aware capability PREDICATE — pinned directly, no
+// mint/token machinery involved (see its own describe block below).
+//
+// The hook itself (loading → resolved, identity, mint-retry recovery) is
+// exercised via the REAL getVectrosApiToken/getVectrosResolvedScope/
+// setPartnerApiTokenMinter seam (vectrosApiTokenCache.ts), not a mocked
+// module — same idiom vectrosApiTokenCache.test.ts uses.
+// useScopeGate reads the mint response's server-resolved `resolvedScope`
+// field directly; it no longer decodes a token client-side at all (that
+// machinery — decodeAllowedActions/decodeIdentity/scopeCompression.ts — was
+// retired in the same change, see this file's own history for the decode
+// tests that used to live here).
 // ---------------------------------------------------------------------------
 
-import * as pako from 'pako';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 
-import {
-  canPerform,
-  decodeAllowedActions,
-  decodeIdentity,
-  useScopeGate,
-  __resetScopeGateDecodeCacheForTest,
-} from './useScopeGate';
-import {
-  __resetVectrosApiTokenCacheForTest,
-  setPartnerApiTokenMinter,
-} from './vectrosApiTokenCache';
-
-/** base64url-encode (no padding) — mirrors how a JWT segment is encoded. */
-function b64url(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-function utf8(s: string): Uint8Array {
-  return new TextEncoder().encode(s);
-}
-
-// Same dictionary as scopeCompression.ts / the platform's own copy —
-// duplicated here (rather than imported) so this test exercises the SAME
-// byte sequence a consumer of the built package would, independent of
-// scopeCompression.ts's own internal wiring.
-const DICTIONARY = utf8(
-  [
-    'member-lifecycle', 'forensic-read', 'context-directory-read', 'delegate-mint',
-    'app-contexts', 'granted_capabilities', 'assumable', 'identity',
-    '${{ under.self.scope.', '${{ under.self.userId }}', '${{ member.scope.',
-    '${{ self.scope.', '${{ self.userId }}', '${{ any }}', ' }}',
-    'partnerUserId', 'scope:group', 'scope:client', 'scope:org',
-    'inference:', 'app-contexts:', 'search:', 'schemas:', 'folders:', 'entities:',
-    'documents:', 'keys:', 'profiles:', 'users:', 'logs:r',
-    ':crud', ':cru', ':crd', ':cr', ':ru', ':rd', ':c', ':r', ':u', ':d', ':s',
-    'records:', 'data_scope', 'allowed_actions', 'scopes',
-    'null', 'true', '"}', ']}', '},{', '":[', '":{', '":"', '","', '":', '{"',
-  ].join(''),
-);
-
-/** Compress `scope` the same way the platform's `ScopeCompression.compressToBase64` does. */
-function compressScope(scope: unknown): string {
-  const deflated = pako.deflateRaw(utf8(JSON.stringify(scope)), { dictionary: DICTIONARY, level: 9 });
-  return b64url(deflated);
-}
-
-/**
- * Build an `st_*`-shaped token whose payload carries `scope` (compressed, matching
- * the real wire format) plus any other claims.
- */
-function makeToken(claims: { scope?: unknown; [k: string]: unknown }): string {
-  const { scope, ...rest } = claims;
-  const payloadClaims = scope === undefined ? rest : { ...rest, scope: compressScope(scope) };
-  const header = b64url(utf8(JSON.stringify({ alg: 'none', typ: 'JWT' })));
-  const payload = b64url(utf8(JSON.stringify(payloadClaims)));
-  return `st_${header}.${payload}.sig`;
-}
-
-beforeEach(() => {
-  __resetScopeGateDecodeCacheForTest();
-});
-
-describe('decodeAllowedActions', () => {
-  test("owner token (scope.scopes=[{allowed_actions:['*']}]) yields the wildcard", () => {
-    const token = makeToken({ scope: { scopes: [{ allowed_actions: ['*'] }] } });
-    expect(decodeAllowedActions(token)).toEqual(['*']);
-  });
-
-  test('scoped token yields exactly its clause actions', () => {
-    const token = makeToken({
-      scope: { scopes: [{ allowed_actions: ['read', 'logs:r'] }] },
-    });
-    expect(decodeAllowedActions(token)).toEqual(['read', 'logs:r']);
-  });
-
-  test('multiple clauses are unioned (and de-duplicated)', () => {
-    const token = makeToken({
-      scope: {
-        scopes: [
-          { allowed_actions: ['users:r'] },
-          { allowed_actions: ['keys:r', 'users:r'] },
-        ],
-      },
-    });
-    expect(decodeAllowedActions(token).slice().sort()).toEqual([
-      'keys:r',
-      'users:r',
-    ]);
-  });
-
-  test('works without the st_ prefix (bare JWT)', () => {
-    const full = makeToken({ scope: { scopes: [{ allowed_actions: ['read'] }] } });
-    const bare = full.replace(/^st_/, '');
-    expect(decodeAllowedActions(bare)).toEqual(['read']);
-  });
-
-  test('a top-level allowed_actions claim is NOT read (no legacy flat shape)', () => {
-    // The token only ever carries scope.scopes[]; a stray flat claim must not
-    // be honored, so a drift back to the old flat decode is caught here.
-    const token = makeToken({ allowed_actions: ['*'] });
-    expect(decodeAllowedActions(token)).toEqual([]);
-  });
-
-  test('missing scope claim → empty', () => {
-    expect(decodeAllowedActions(makeToken({ tenant_id: 't_1' }))).toEqual([]);
-  });
-
-  test('non-string entries are filtered out', () => {
-    const token = makeToken({
-      scope: { scopes: [{ allowed_actions: ['read', 42, null, 'logs:r'] }] },
-    });
-    expect(decodeAllowedActions(token)).toEqual(['read', 'logs:r']);
-  });
-
-  test('malformed tokens decode to empty (no throw)', () => {
-    expect(decodeAllowedActions('not-a-jwt')).toEqual([]);
-    expect(decodeAllowedActions('st_test_a.b')).toEqual([]); // too few segments
-    expect(decodeAllowedActions('st_test_a.@@@.c')).toEqual([]); // bad base64/JSON
-  });
-
-  // A compressed `scope` claim that fails to decompress (corrupt data, or a
-  // dictionary out of sync with the platform's) must degrade to empty
-  // claims, not throw — the failure mode this file's decode exists to avoid.
-  test('a corrupt compressed scope claim decodes to empty (no throw)', () => {
-    const header = utf8(JSON.stringify({ alg: 'none', typ: 'JWT' }));
-    const payload = utf8(JSON.stringify({ scope: 'not-valid-deflate-data!!!' }));
-    const token = `st_${b64url(header)}.${b64url(payload)}.sig`;
-    expect(decodeAllowedActions(token)).toEqual([]);
-  });
-
-  // A plain-object `scope` (the pre-compression wire shape) still decodes —
-  // defensive only, see decodeScopeClaims's own doc for why.
-  test('a legacy plain-object scope claim still decodes', () => {
-    const header = utf8(JSON.stringify({ alg: 'none', typ: 'JWT' }));
-    const payload = utf8(JSON.stringify({ scope: { scopes: [{ allowed_actions: ['*'] }] } }));
-    const token = `st_${b64url(header)}.${b64url(payload)}.sig`;
-    expect(decodeAllowedActions(token)).toEqual(['*']);
-  });
-
-  // Drift guard: a real compressed `scope` claim captured from a live-minted
-  // st_* token (an OWNER account, short-lived token, no credentials). If
-  // DICTIONARY in scopeCompression.ts ever drifts from the platform's own
-  // copy, this fails loudly instead of silently.
-  test('decodes a REAL staging-minted compressed scope claim (dictionary drift guard)', () => {
-    const realCompressedScope =
-      'q1aCKAOKVyuhGQBSq6UUq6OELY5Akrlo6QBoJko8g_QinAeyTgukDRHcSjog5wEdFlsLAA';
-    const header = utf8(JSON.stringify({ alg: 'ES256', typ: 'JWT' }));
-    const payload = utf8(JSON.stringify({ scope: realCompressedScope }));
-    const token = `st_${b64url(header)}.${b64url(payload)}.sig`;
-    expect(decodeAllowedActions(token)).toEqual(['*']);
-  });
-});
-
-describe('decodeIdentity', () => {
-  test('an OWNER token (no identity claim at all) yields an empty object', () => {
-    const token = makeToken({ scope: { scopes: [{ allowed_actions: ['*'] }] } });
-    expect(decodeIdentity(token)).toEqual({});
-  });
-
-  test('a sub-user token with scope:org + partnerUserId yields both, verbatim', () => {
-    const token = makeToken({
-      scope: {
-        scopes: [{ allowed_actions: ['profiles:r'] }],
-        identity: { partnerUserId: 'u_123', 'scope:org': 'org_a' },
-      },
-    });
-    expect(decodeIdentity(token)).toEqual({
-      partnerUserId: 'u_123',
-      'scope:org': 'org_a',
-    });
-  });
-
-  test('an explicit empty identity object also decodes to empty', () => {
-    const token = makeToken({ scope: { scopes: [], identity: {} } });
-    expect(decodeIdentity(token)).toEqual({});
-  });
-
-  test('non-string identity values are dropped, not coerced', () => {
-    const token = makeToken({
-      scope: { scopes: [], identity: { 'scope:org': 'org_a', 'scope:client': 42, junk: null } },
-    });
-    expect(decodeIdentity(token)).toEqual({ 'scope:org': 'org_a' });
-  });
-
-  test('a malformed identity shape (array, not object) decodes to empty (no throw)', () => {
-    const token = makeToken({ scope: { scopes: [], identity: ['not', 'a', 'map'] } });
-    expect(decodeIdentity(token)).toEqual({});
-  });
-
-  test('missing scope claim entirely → empty', () => {
-    expect(decodeIdentity(makeToken({ tenant_id: 't_1' }))).toEqual({});
-  });
-
-  test('malformed tokens decode to empty (no throw)', () => {
-    expect(decodeIdentity('not-a-jwt')).toEqual({});
-    expect(decodeIdentity('st_test_a.b')).toEqual({});
-    expect(decodeIdentity('st_test_a.@@@.c')).toEqual({});
-  });
-
-  test('decodeAllowedActions and decodeIdentity read the SAME token consistently (one decode pass, cached together)', () => {
-    const token = makeToken({
-      scope: {
-        scopes: [{ allowed_actions: ['profiles:r', 'profiles:u'] }],
-        identity: { 'scope:org': 'org_a' },
-      },
-    });
-    expect(decodeAllowedActions(token)).toEqual(['profiles:r', 'profiles:u']);
-    expect(decodeIdentity(token)).toEqual({ 'scope:org': 'org_a' });
-  });
-});
+import { OPS_LETTERS, canPerform, isOpsString, useScopeGate } from './useScopeGate';
+import { __resetVectrosApiTokenCacheForTest, setPartnerApiTokenMinter } from './vectrosApiTokenCache';
 
 // -----------------------------------------------------------------------------
 // canPerform — the ops-aware capability check. Not credential-shape-exhaustive
@@ -316,10 +108,133 @@ describe('canPerform', () => {
     expect(canPerform([], 'users:r')).toBe(false);
     expect(canPerform(['logs:r'], 'users:r')).toBe(false);
   });
+
+  // ---------------------------------------------------------------------------
+  // The `x` (execute) op letter.
+  //
+  // Cells are labelled EVIDENCE or PINS. An EVIDENCE cell fails against an
+  // ops-letter set lacking `x` and so proves the fix; a PINS cell passes either
+  // way and is here to hold a documented promise still, not to demonstrate
+  // anything. Both are worth keeping and only one is worth citing — an earlier
+  // version of this block claimed every cell was the first kind, which was
+  // wrong for five of them.
+  // ---------------------------------------------------------------------------
+  test('a combined entry carrying x satisfies a narrower x ask', () => {
+    expect(canPerform(['scripts:cx'], 'scripts:x')).toBe(true); // EVIDENCE
+    expect(canPerform(['scripts:crx'], 'scripts:cx')).toBe(true); // EVIDENCE
+  });
+
+  test('x unions across separate entries, like every other op letter', () => {
+    expect(canPerform(['scripts:c', 'scripts:x'], 'scripts:cx')).toBe(true); // EVIDENCE
+    // Missing 'r' — only c+x granted.
+    expect(canPerform(['scripts:c', 'scripts:x'], 'scripts:crx')).toBe(false); // PINS
+  });
+
+  test('a grant that merely MENTIONS x no longer poisons asks for its other letters', () => {
+    // The sharp end of an unrecognized letter: `scripts:rx` stops parsing as an
+    // ops string entirely, so it contributes nothing to the union and an ask for
+    // the wholly unrelated `r` it grants falls through to an exact-match denial.
+    // A credential is told it cannot read scripts because it can also execute
+    // them.
+    expect(canPerform(['scripts:rx'], 'scripts:r')).toBe(true); // EVIDENCE
+    expect(canPerform(['scripts:rx'], 'scripts:x')).toBe(true); // EVIDENCE
+    // Still nothing it was not granted.
+    expect(canPerform(['scripts:rx'], 'scripts:c')).toBe(false); // PINS
+  });
+
+  test('the plainest execute grant answers the plainest execute ask', () => {
+    // PINS, and deliberately so: the exact-string fallback already answered this
+    // correctly before the fix, which is exactly why the defect looked narrower
+    // than it was. It is the feature's happy path and the shape a consumer will
+    // write first, so it should not depend on a fallback nobody is watching.
+    expect(canPerform(['scripts:x'], 'scripts:x')).toBe(true);
+    expect(canPerform(['*'], 'scripts:x')).toBe(true);
+    expect(canPerform([], 'scripts:x')).toBe(false);
+  });
+
+  test('a per-script grant does NOT satisfy a bare execute ask either', () => {
+    // PINS the mirror image, and the reason the doc does not simply say "gate on
+    // the bare form": a credential issued exactly one script answers false to
+    // "can you execute scripts at all", where the platform answers true. Gating
+    // a Scripts surface on the bare ask alone hides it from the caller the
+    // per-script grant exists for.
+    expect(canPerform(['scripts:x:daily-report'], 'scripts:x')).toBe(false);
+  });
+
+  test('a bare execute grant does NOT satisfy a per-script ask', () => {
+    // PINS the documented divergence from the API, which is wider here: a bare
+    // `scripts:x` covers every script, and the platform's authorizer answers
+    // true to a qualified ask against it. This predicate answers false, because
+    // an unqualified grant never feeds a qualified ask. Gate a "can execute
+    // scripts at all" surface on the bare form. Asserted here because it lives
+    // otherwise only in prose, and prose is what a later refactor overrules.
+    expect(canPerform(['scripts:x'], 'scripts:x:daily-report')).toBe(false);
+  });
+
+  test('a qualified x grant unions and confines like any other qualified grant', () => {
+    // `scripts:x:<name>` — the per-script execute grant. Note there is no
+    // combined-qualified shape to test on `scripts`: `scripts:cx:<name>` is
+    // refused at authoring as mixed, since the qualifier is meaningful for `x`
+    // alone. `records` takes a qualifier on every op, so it carries the
+    // combined-qualified EVIDENCE cell instead.
+    expect(canPerform(['records:crudx:patient'], 'records:x:patient')).toBe(true); // EVIDENCE
+    expect(canPerform(['scripts:x:daily-report'], 'scripts:x:daily-report')).toBe(true); // PINS
+    expect(canPerform(['scripts:x:daily-report'], 'scripts:x:month-end')).toBe(false); // PINS
+    expect(canPerform(['scripts:x:daily-report'], 'scripts:x')).toBe(false); // PINS
+  });
+
+  test('x does not leak between resources, and CRUD grants do not satisfy an x ask', () => {
+    // Named for what these cells actually prove. They do NOT prove "x widens
+    // nothing on a gated resource" — it does widen one thing there, asserted
+    // below, and a test name claiming otherwise would be read as a guarantee.
+    expect(canPerform(['records:x'], 'records:r')).toBe(false); // PINS
+    expect(canPerform(['records:crud'], 'records:x')).toBe(false); // PINS
+    expect(canPerform(['scripts:x'], 'records:x')).toBe(false); // PINS
+  });
+
+  test('x on a resource that ignores it is answered, not withheld — matching the platform', () => {
+    // EVIDENCE, and the one place this change genuinely answers `true` where it
+    // used to answer `false` outside `scripts`. The letter is grammatically
+    // valid everywhere and acts only on `scripts`, so `records:x` authors
+    // cleanly and grants nothing; no gate ever asks it. Mirroring the
+    // authorizer's own answer is the correct behaviour, and pretending
+    // otherwise would be this predicate inventing a rule the platform does not
+    // have.
+    expect(canPerform(['records:rx'], 'records:x')).toBe(true);
+  });
+
+  test('the NEXT unknown letter degrades exactly the way this one did', () => {
+    // PINS the shape the conformance guard exists to catch, so the degradation
+    // is documented rather than rediscovered. `z` is not an op letter; a grant
+    // carrying it stops parsing as an ops string, and the ask falls to exact
+    // matching — which answers correctly for an identical spelling and wrongly
+    // for every other one. When this cell starts failing, a letter was added to
+    // the platform and this package has not caught up.
+    expect(canPerform(['scripts:xz'], 'scripts:xz')).toBe(true); // the misleading one
+    expect(canPerform(['scripts:xz'], 'scripts:x')).toBe(false); // the real cost
+  });
 });
 
 // -----------------------------------------------------------------------------
-// useScopeGate's mint effect, observed through a failure+recovery cycle.
+// The ops-letter set itself. Module-exported for the SDK conformance guard in
+// scopeGrammar.sdkContract.test.ts, which asserts it against the platform's own
+// published description; pinned here only for its shape, since asserting its
+// VALUE against a literal written in this repository is the same-language trap
+// that guard exists to escape.
+// -----------------------------------------------------------------------------
+describe('isOpsString', () => {
+  test('accepts a non-empty string of recognized letters and nothing else', () => {
+    for (const letter of OPS_LETTERS) expect(isOpsString(letter)).toBe(true);
+    expect(isOpsString(OPS_LETTERS)).toBe(true);
+    expect(isOpsString('')).toBe(false);
+    expect(isOpsString('users')).toBe(false); // one stray letter disqualifies the whole segment
+    expect(isOpsString('C')).toBe(false); // case-sensitive, matching the platform
+  });
+});
+
+// -----------------------------------------------------------------------------
+// useScopeGate — loading/resolved state, identity, and the mint-retry
+// recovery observed through a failure+recovery cycle.
 //
 // The one-shot retry that makes this recover no longer lives IN this hook —
 // it moved down into vectrosApiTokenCache.ts's getVectrosApiToken itself
@@ -335,21 +250,55 @@ describe('canPerform', () => {
 // the retry mechanism sits one layer down, not asserting anything about
 // where the retry lives.
 // -----------------------------------------------------------------------------
-describe('useScopeGate — mint retry', () => {
+describe('useScopeGate', () => {
   afterEach(() => {
     __resetVectrosApiTokenCacheForTest();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
-  test('a mint that fails once then succeeds on retry recovers — does not stick at EMPTY_CLAIMS', async () => {
+  test('loading is true until the mint resolves, then exposes the resolved allowedActions/identity', async () => {
+    setPartnerApiTokenMinter(async () => ({
+      token: 'st_test',
+      expiresAtMs: Date.now() + 900_000,
+      resolvedScope: { allowedActions: ['records:r:case'], identity: { userId: 'usr_1' } },
+    }));
+
+    const { result } = renderHook(() => useScopeGate('tnt_test'));
+    expect(result.current.loading).toBe(true);
+    expect(result.current.allowedActions).toEqual([]);
+    expect(result.current.identity).toEqual({});
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.allowedActions).toEqual(['records:r:case']);
+    expect(result.current.identity).toEqual({ userId: 'usr_1' });
+    expect(result.current.can('records:r:case')).toBe(true);
+  });
+
+  test('a minter that supplies no resolvedScope degrades to empty (not throw)', async () => {
+    // A fork mid-migration, or an older backend response shape — the mint
+    // itself still succeeds, but there's nothing to gate on.
+    setPartnerApiTokenMinter(async () => ({ token: 'st_no_scope', expiresAtMs: Date.now() + 900_000 }));
+
+    const { result } = renderHook(() => useScopeGate('tnt_test'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.allowedActions).toEqual([]);
+    expect(result.current.identity).toEqual({});
+    expect(result.current.can('records:r:case')).toBe(false);
+  });
+
+  test('a mint that fails once then succeeds on retry recovers — does not stick at empty', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const token = makeToken({ scope: { scopes: [{ allowed_actions: ['records:r:case'] }] } });
     let attempt = 0;
     setPartnerApiTokenMinter(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('transient mint failure');
-      return { token, expiresAtMs: Date.now() + 10 * 60_000 };
+      return {
+        token: 'st_retry_ok',
+        expiresAtMs: Date.now() + 10 * 60_000,
+        resolvedScope: { allowedActions: ['records:r:case'], identity: {} },
+      };
     });
 
     const { result } = renderHook(() => useScopeGate('tnt_test'));
@@ -365,7 +314,7 @@ describe('useScopeGate — mint retry', () => {
     expect(result.current.allowedActions).toEqual(['records:r:case']);
   });
 
-  test('a mint that fails on BOTH attempts degrades to EMPTY_CLAIMS (unchanged behavior)', async () => {
+  test('a mint that fails on BOTH attempts degrades to empty (unchanged behavior)', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let attempt = 0;
     setPartnerApiTokenMinter(async () => {
@@ -384,11 +333,14 @@ describe('useScopeGate — mint retry', () => {
   });
 
   test('a mint that succeeds on the first try never triggers a retry', async () => {
-    const token = makeToken({ scope: { scopes: [{ allowed_actions: ['*'] }] } });
     let attempt = 0;
     setPartnerApiTokenMinter(async () => {
       attempt += 1;
-      return { token, expiresAtMs: Date.now() + 10 * 60_000 };
+      return {
+        token: 'st_ok',
+        expiresAtMs: Date.now() + 10 * 60_000,
+        resolvedScope: { allowedActions: ['*'], identity: {} },
+      };
     });
 
     const { result } = renderHook(() => useScopeGate('tnt_test'));

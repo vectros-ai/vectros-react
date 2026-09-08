@@ -67,6 +67,53 @@
 import type { TenantId } from './types';
 
 /**
+ * A token's resolved `allowedActions` + `identity` — the plaintext facets a UI
+ * permission gate needs, resolved SERVER-SIDE rather than decoded client-side
+ * from the token's own compressed `scope` claim. `useScopeGate` reads this
+ * directly. `identity` uses the PUBLIC key spelling (`userId`, plus
+ * `scope:<namespace>` keys) — never the internal `partnerUserId` form.
+ */
+export interface PartnerApiResolvedScope {
+  readonly allowedActions: ReadonlyArray<string>;
+  readonly identity: Readonly<Record<string, string>>;
+}
+
+const EMPTY_RESOLVED_SCOPE: PartnerApiResolvedScope = { allowedActions: [], identity: {} };
+
+/**
+ * Normalizes a mint/exchange/assume response's `resolvedScope` field
+ * (`{allowedActions: string[], identity: Record<string,string>}`) into a
+ * well-typed {@link PartnerApiResolvedScope}. Shared by every provider
+ * (`auth0.ts`, `cognito.ts`) parsing the SAME backend field — kept here, once,
+ * rather than duplicated per provider so a wire-shape defensiveness bug can't
+ * drift between them (see `useScopeGate.ts`'s file header for the drift risk
+ * this design specifically closes).
+ *
+ * Defensive against a missing/malformed field (an older backend, a test
+ * fixture, a fork's own minter that hasn't wired this yet): never throws,
+ * falls back to an empty scope rather than reject the whole mint over one
+ * secondary field.
+ */
+export function parseResolvedScope(raw: unknown): PartnerApiResolvedScope {
+  if (raw == null || typeof raw !== 'object') return EMPTY_RESOLVED_SCOPE;
+  const obj = raw as { allowedActions?: unknown; identity?: unknown };
+
+  const allowedActions = Array.isArray(obj.allowedActions)
+    ? obj.allowedActions.filter((a): a is string => typeof a === 'string')
+    : [];
+
+  let identity: Record<string, string> = {};
+  if (obj.identity != null && typeof obj.identity === 'object' && !Array.isArray(obj.identity)) {
+    identity = {};
+    for (const [k, v] of Object.entries(obj.identity as Record<string, unknown>)) {
+      if (typeof v === 'string') identity[k] = v;
+    }
+  }
+
+  return { allowedActions, identity };
+}
+
+/**
  * Which single-value identity namespace to activate on the returned bearer, and
  * which value — the `POST /v1/auth/token/assume` request shape, e.g.
  * `{ namespace: 'scope:org', value: 'orgB' }`. Optional third argument to
@@ -118,11 +165,21 @@ function delay(ms: number): Promise<void> {
  * data-plane context switcher). The Vectros reference impl is
  * `CognitoAuthProvider.mintPartnerApiToken`; a fork supplies its own. Injected
  * via {@link setPartnerApiTokenMinter}.
+ *
+ * `resolvedScope` is OPTIONAL on this type — a fork's own minter that
+ * hasn't wired it yet still compiles and still mints working bearers; it just
+ * gets an empty scope out of {@link getVectrosResolvedScope} until it does
+ * (same "degrade to empty, never throw" contract the old client-side decode
+ * had). Both reference providers (`auth0.ts`, `cognito.ts`) always supply it.
  */
 export type PartnerApiTokenMinter = (
   tenantId: TenantId,
   contextId?: string,
-) => Promise<{ readonly token: string; readonly expiresAtMs: number }>;
+) => Promise<{
+  readonly token: string;
+  readonly expiresAtMs: number;
+  readonly resolvedScope?: PartnerApiResolvedScope;
+}>;
 
 /**
  * Exchanges an already-minted partner-API bearer for one with a single
@@ -130,12 +187,17 @@ export type PartnerApiTokenMinter = (
  * method for `POST /v1/auth/token/assume`. `bearer` is the BASE (tenant,
  * context) token this cache already holds; the Vectros reference impl calls
  * the endpoint with that bearer as `Authorization`. A fork supplies its own.
- * Injected via {@link setPartnerApiTokenAssumer}.
+ * Injected via {@link setPartnerApiTokenAssumer}. `resolvedScope` is optional
+ * for the same reason as {@link PartnerApiTokenMinter}'s own — see its doc.
  */
 export type PartnerApiTokenAssumer = (
   bearer: string,
   override: VectrosIdentityOverride,
-) => Promise<{ readonly token: string; readonly expiresAtMs: number }>;
+) => Promise<{
+  readonly token: string;
+  readonly expiresAtMs: number;
+  readonly resolvedScope?: PartnerApiResolvedScope;
+}>;
 
 // ---- Module-local state (intentionally not reactive — the axios interceptor
 //      reads + writes these on demand). Keyed by a composite (tenant, context[,
@@ -144,6 +206,14 @@ export type PartnerApiTokenAssumer = (
 const cachedTokens = new Map<string, string>();
 /** Expiry as epoch-ms. Absent = no token. */
 const cachedExpiriesMs = new Map<string, number>();
+/**
+ * Resolved allowedActions/identity for the same slot, set alongside
+ * `cachedTokens`/`cachedExpiriesMs` on every successful mint and cleared
+ * together with them — see {@link getVectrosResolvedScope}. Never read on its
+ * own without going through `getVectrosApiToken` first, so it can never be
+ * stale relative to the token it describes.
+ */
+const cachedResolvedScopes = new Map<string, PartnerApiResolvedScope>();
 const inFlightMints = new Map<string, Promise<string>>();
 let cacheGeneration = 0;
 let minter: PartnerApiTokenMinter | null = null;
@@ -241,7 +311,11 @@ export function getVectrosApiToken(
    * below actually starts (still synchronous up to here, so the in-flight
    * Map.set above happens before any await, same as before this branch existed).
    */
-  const fetchFresh = (): Promise<{ readonly token: string; readonly expiresAtMs: number }> => {
+  const fetchFresh = (): Promise<{
+    readonly token: string;
+    readonly expiresAtMs: number;
+    readonly resolvedScope?: PartnerApiResolvedScope;
+  }> => {
     if (!identityOverride) {
       if (!minter) {
         throw new Error(
@@ -288,7 +362,11 @@ export function getVectrosApiToken(
     // this function's body can possibly reach its own finally.
     await Promise.resolve();
     try {
-      let result: { readonly token: string; readonly expiresAtMs: number };
+      let result: {
+        readonly token: string;
+        readonly expiresAtMs: number;
+        readonly resolvedScope?: PartnerApiResolvedScope;
+      };
       try {
         result = await fetchFresh();
       } catch (firstErr) {
@@ -307,7 +385,7 @@ export function getVectrosApiToken(
         }
         result = await fetchFresh();
       }
-      const { token, expiresAtMs } = result;
+      const { token, expiresAtMs, resolvedScope } = result;
 
       // If clearVectrosApiTokenCache fired while this mint was in flight, the
       // identity/context it was minted for is no longer active. Throw the result
@@ -318,6 +396,25 @@ export function getVectrosApiToken(
 
       cachedTokens.set(key, token);
       cachedExpiriesMs.set(key, expiresAtMs);
+      // A minter that hasn't wired resolvedScope yet (see PartnerApiTokenMinter's
+      // own doc) leaves this slot unset — getVectrosResolvedScope degrades that
+      // to an empty scope, never a stale/mismatched one. That degraded state is
+      // otherwise indistinguishable from a legitimately unprivileged session (a
+      // real backend response with an empty allowedActions/identity looks the
+      // same on this side) — warn so a mint that quietly stopped carrying
+      // resolvedScope (e.g. a platform deploy landing after this frontend's,
+      // before the field existed) shows up as a diagnosable signal instead of
+      // silently blanking every gated surface with no clue why.
+      if (resolvedScope) {
+        cachedResolvedScopes.set(key, resolvedScope);
+      } else {
+        cachedResolvedScopes.delete(key);
+        console.warn(
+          'vectrosApiTokenCache: mint succeeded but the response carried no resolvedScope — ' +
+            'useScopeGate will see an empty allowedActions/identity. Either the minter/backend ' +
+            "hasn't been updated to supply it yet, or a deploy landed out of order.",
+        );
+      }
       return token;
     } finally {
       // Release the in-flight slot — but ONLY if it still references THIS mint.
@@ -330,6 +427,32 @@ export function getVectrosApiToken(
   })();
   inFlightMints.set(key, mintPromise);
   return mintPromise;
+}
+
+/**
+ * Get the resolved `allowedActions`/`identity` for the SAME `(tenantId,
+ * contextId, identityOverride)` slot {@link getVectrosApiToken} mints —
+ * `useScopeGate`'s own source, replacing the old client-side JWT/compressed-
+ * `scope`-claim decode.
+ *
+ * Delegates entirely to {@link getVectrosApiToken} for the mint/cache-hit/
+ * coalescing/retry/generation-defense machinery (never re-implemented here),
+ * then reads the resolved-scope slot that {@link getVectrosApiToken}'s own
+ * mint just populated (or already held, on a cache hit) — so this call sees
+ * exactly the token it would have minted, never a mismatched one. Returns
+ * `null` only when the minter/assumer that produced the cached token hasn't
+ * wired `resolvedScope` yet (a fork mid-migration) — never on a genuine mint
+ * failure, which rejects same as `getVectrosApiToken` does.
+ */
+export function getVectrosResolvedScope(
+  tenantId: TenantId,
+  contextId?: string,
+  identityOverride?: VectrosIdentityOverride,
+): Promise<PartnerApiResolvedScope | null> {
+  const key = slotKey(tenantId, contextId, identityOverride);
+  return getVectrosApiToken(tenantId, contextId, identityOverride).then(
+    () => cachedResolvedScopes.get(key) ?? null,
+  );
 }
 
 /**
@@ -349,6 +472,7 @@ export function clearVectrosApiTokenCache(): void {
   cacheGeneration += 1;
   cachedTokens.clear();
   cachedExpiriesMs.clear();
+  cachedResolvedScopes.clear();
   inFlightMints.clear();
 }
 

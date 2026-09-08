@@ -48,6 +48,8 @@ import {
 import { decodeJwt } from 'jose';
 
 import { AuthError } from '../errors';
+import type { PartnerApiResolvedScope } from '../vectrosApiTokenCache';
+import { parseResolvedScope } from '../vectrosApiTokenCache';
 import type {
   AppContextSummary,
   ListAppContextsOptions,
@@ -547,7 +549,7 @@ export class CognitoAuthProvider
   async mintPartnerApiToken(
     tenantId: TenantId,
     contextId?: string,
-  ): Promise<{ token: string; expiresAtMs: number }> {
+  ): Promise<{ token: string; expiresAtMs: number; resolvedScope: PartnerApiResolvedScope }> {
     const idToken = await this.getIdToken();
     if (!idToken) {
       throw new AuthError('INVALID_CREDENTIALS', 'Not authenticated — cannot mint a partner-API token.');
@@ -565,11 +567,17 @@ export class CognitoAuthProvider
       const body = await resp.text().catch(() => '');
       throw new AuthError('UNKNOWN', `Partner-API token mint failed: ${resp.status} ${body}`);
     }
-    const { token, expiresAt } = (await resp.json()) as {
+    const { token, expiresAt, resolvedScope } = (await resp.json()) as {
       readonly token: string;
       readonly expiresAt: number;
+      // The token's resolved allowedActions/identity, parsed via parseResolvedScope.
+      readonly resolvedScope?: unknown;
     };
-    return { token, expiresAtMs: expiresAt * 1000 }; // backend returns epoch seconds
+    return {
+      token,
+      expiresAtMs: expiresAt * 1000, // backend returns epoch seconds
+      resolvedScope: parseResolvedScope(resolvedScope),
+    };
   }
 
   /**

@@ -6,7 +6,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { extractErrorMessage, extractRequestId, isVersionConflict, statusCodeOf } from './apiError';
+import {
+  errorCodeOf,
+  extractErrorMessage,
+  extractRequestId,
+  isVersionConflict,
+  statusCodeOf,
+} from './apiError';
 
 describe('extractRequestId', () => {
   it('reads requestId from a well-formed error envelope', () => {
@@ -89,5 +95,37 @@ describe('isVersionConflict', () => {
     expect(isVersionConflict({ statusCode: 409 })).toBe(true);
     expect(isVersionConflict({ statusCode: 400 })).toBe(false);
     expect(isVersionConflict({})).toBe(false);
+  });
+});
+
+describe('errorCodeOf', () => {
+  it('reads the envelope’s machine-readable cause', () => {
+    expect(errorCodeOf({ statusCode: 409, body: { errorCode: 'VERSION_CONFLICT' } }))
+      .toBe('VERSION_CONFLICT');
+  });
+
+  it('separates two failures that share a status code', () => {
+    // The pair the status test cannot resolve: one is worth offering a reload
+    // and retry for, the other will refuse the identical request forever.
+    const raced = { statusCode: 409, body: { errorCode: 'VERSION_CONFLICT' } };
+    const stillReferenced = { statusCode: 409, body: { errorCode: 'RESOURCE_IN_USE' } };
+    expect(isVersionConflict(raced)).toBe(true);
+    expect(isVersionConflict(stillReferenced)).toBe(true); // a status test cannot tell
+    expect(errorCodeOf(raced)).not.toBe(errorCodeOf(stillReferenced)); // this can
+  });
+
+  it('is undefined when the API named no cause — not an assertion that there was none', () => {
+    expect(errorCodeOf({ statusCode: 409, body: { message: 'Duplicate ID specified' } }))
+      .toBeUndefined();
+    expect(errorCodeOf({ statusCode: 500 })).toBeUndefined();
+  });
+
+  it('returns undefined for a non-API error or a malformed body', () => {
+    expect(errorCodeOf(new Error('network'))).toBeUndefined();
+    expect(errorCodeOf({ body: 'not an object' })).toBeUndefined();
+    expect(errorCodeOf({ body: null })).toBeUndefined();
+    expect(errorCodeOf({ body: { errorCode: 42 } })).toBeUndefined();
+    expect(errorCodeOf({ body: { errorCode: '' } })).toBeUndefined();
+    expect(errorCodeOf(null)).toBeUndefined();
   });
 });

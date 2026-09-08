@@ -3,6 +3,91 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.12.0 — 2026-09-07
+
+### Added
+
+- **`RecordColumn.inline`** — `deriveValueColumns` now reports the schema's `inline` flag on each
+  derived column, alongside the `filterable` flag it already carried. `inline` keeps a field on the
+  record row when the payload is stored out of line, so a list read without `includePayload` has a
+  value to render; a column derived from a payload-only field has nothing to show for *any* row on
+  such a schema, and neither the schema nor the response says why. Reported, not acted on — whether
+  to hide the column, render it empty, or read payloads instead is the host's call.
+
+  Note `inline: false` does **not** mean "absent from a payload-less row": `filterable` fields and
+  the schema's lookup fields are kept on the row too, and lookup fields are not visible from a
+  `FieldDef` at all (`lookupFields` is a sibling collection on the schema). Union this flag with
+  `filterable` and your own lookup field ids if you need the whole question answered.
+
+- **`getVectrosResolvedScope(tenantId, contextId?, identityOverride?)`** — reads the resolved scope
+  for the same slot `getVectrosApiToken` mints, sharing all of its caching/coalescing/retry
+  machinery. `PartnerApiResolvedScope` is exported alongside it.
+
+- **`errorCodeOf(err)`** — reads the machine-readable `errorCode` off a failed call's error
+  envelope, alongside the existing `extractRequestId`/`extractErrorMessage`/`statusCodeOf`. The pair
+  it exists for is the one a status test cannot resolve: `VERSION_CONFLICT` (your update raced
+  another writer — reload and retry) and `RESOURCE_IN_USE` (the resource is still referenced by live
+  dependents, so retrying the identical request never succeeds) both arrive as HTTP 409. Returns
+  `undefined` when the API named no cause, which is common and is not the same as "no error"; match
+  on the value and treat an unrecognised code as unknown rather than assuming your list is
+  exhaustive.
+
+### Changed
+
+- **`useScopeGate` no longer decodes the token client-side.** It now reads the mint/exchange/assume
+  response's server-resolved `allowedActions`/`identity` (`resolvedScope`) directly — the backend
+  resolves them from the exact same plaintext scope data it's about to compress into the token's own
+  `scope` claim, so there's nothing left to decode (or drift) on this side. Replaces the old
+  client-side JWT decode + a duplicated DEFLATE preset dictionary that had to stay byte-for-byte in
+  sync with the platform's own copy.
+- **`PartnerApiTokenMinter`/`PartnerApiTokenAssumer`** now carry an optional `resolvedScope` field on
+  their resolved value. Both reference providers (`CognitoAuthProvider`, `Auth0AuthProvider`) supply
+  it; a fork's own minter that hasn't wired it yet keeps compiling and minting working bearers — it
+  just gets an empty scope out of `useScopeGate`/`getVectrosResolvedScope` until it does.
+
+### Removed
+
+- **`__resetScopeGateDecodeCacheForTest`/`__compressScopeClaimForTest`** — both retired along with the
+  client-side JWT/compressed-`scope`-claim decode they supported (`scopeCompression.ts`, and its `pako`
+  dependency) now that `useScopeGate` reads the plaintext `resolvedScope` field instead. A consuming
+  app's test suite building a mint-response fixture should set `resolvedScope` directly rather than
+  compressing a token claim. (`decodeAllowedActions`/`decodeIdentity`, the decode functions themselves,
+  are also gone, but were never re-exported from this package's public entry point — an internal
+  implementation detail, not a public-API removal.)
+
+### Fixed
+
+- **`useScopeGate` can now evaluate the `x` (execute) op letter.** The hook's ops-letter set predated
+  `x` — the letter that grants execution of a stored script, as `scripts:x` for every script or
+  `scripts:x:<name>` for one — so an ops segment carrying it stopped being recognized as an ops
+  string at all, and both the grant and the ask fell out of ops-aware evaluation into the
+  exact-string fallback.
+
+  **The breakage was partial.**
+  `can('scripts:x')` against a grant spelled exactly `scripts:x` already answered `true` through
+  that fallback — the simplest case, and the one you would check first. Every other spelling of the
+  same permission answered `false`: a combined grant (`scripts:cx`), ops split across separate
+  entries (`scripts:c` + `scripts:x`, asked as `scripts:cx`), and — the sharpest — an ask for an
+  UNRELATED letter on a resource whose grant merely mentions `x`, so a credential holding
+  `scripts:rx` was told it could not do `scripts:r`. Gating on the compact form now behaves the same
+  way for `x` as for every other letter.
+
+  **One divergence from the API is worth planning around**, because it is the shape a per-script
+  UI reaches for first: a BARE `scripts:x` grant covers every script, and this gate does not treat
+  it as satisfying a per-script ask like `can('scripts:x:daily-report')` — an unqualified grant
+  never feeds a qualified ask here, though the API itself would allow the call. Gate a "can execute
+  scripts at all" surface on the bare form, and reserve the qualified ask for a credential you
+  expect to hold the qualified grant.
+
+- **`isVersionConflict`'s documentation now says where its premise actually holds.** It reported a
+  409 as an optimistic-concurrency conflict on the strength of "no other 409 arises on an update
+  path", which is true of the record and document updates it exists for and not of the API
+  generally: other endpoints answer 409 for resource-state reasons that a reload-and-retry never
+  clears, and `PUT /v1/schemas/{id}` became one of them in the 0.43.0 API. Behaviour is unchanged —
+  it remains a 409 status test, so nothing that calls it today answers differently — but the
+  contract now scopes the claim and points callers at `errorCodeOf` for the cases where the status
+  alone does not decide.
+
 ## 0.11.0 — 2026-09-01
 
 ### Added

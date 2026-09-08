@@ -5,7 +5,7 @@ import { defineConfig } from 'tsup';
  *
  * tsup auto-externalizes everything in `dependencies` + `peerDependencies`,
  * so React, MUI, Emotion, TanStack Query, Amplify, Auth0, react-intl,
- * react-router, the SDK, and the leaf utils (jose, qrcode.react, zxcvbn, pako)
+ * react-router, the SDK, and the leaf utils (jose, qrcode.react, zxcvbn)
  * all stay external — npm installs them as ordinary transitive dependencies
  * for anyone who installs this package. We ship only this package's own source.
  *

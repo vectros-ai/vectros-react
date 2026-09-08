@@ -42,6 +42,28 @@ describe('deriveValueColumns', () => {
     expect(cols[1]).toMatchObject({ label: 'b', filterable: false }); // fieldId fallback
   });
 
+  it('reports the inline flag per column, independently of filterable', () => {
+    // The two flags answer different questions and a column can carry either,
+    // both or neither — so this asserts the cross, not one flag standing in for
+    // the other. `inline` says the schema keeps the field on the record row, so
+    // a list read without the payload has a value to render; `filterable`
+    // drives the filter affordance and happens to imply row-residency too,
+    // which is why the doc tells a host to union them rather than read one.
+    const fields = [
+      field('plain', 'string'),
+      field('inl', 'string', { inline: true }),
+      field('filt', 'string', { filterable: true }),
+      field('both', 'string', { inline: true, filterable: true }),
+    ];
+    const byId = Object.fromEntries(
+      deriveValueColumns(fields, undefined, 10).map((c) => [c.fieldId, c]),
+    );
+    expect(byId['plain']).toMatchObject({ inline: false, filterable: false });
+    expect(byId['inl']).toMatchObject({ inline: true, filterable: false });
+    expect(byId['filt']).toMatchObject({ inline: false, filterable: true });
+    expect(byId['both']).toMatchObject({ inline: true, filterable: true });
+  });
+
   it('is empty when no displayable fields', () => {
     expect(deriveValueColumns([field('x', 'array')])).toEqual([]);
   });

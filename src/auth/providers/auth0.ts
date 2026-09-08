@@ -37,6 +37,8 @@ import type { IdToken } from '@auth0/auth0-spa-js';
 
 import { AuthError } from '../errors';
 import type { AuthProviderAdapter, AuthUser, HostedRedirectAuth } from '../types';
+import type { PartnerApiResolvedScope } from '../vectrosApiTokenCache';
+import { parseResolvedScope } from '../vectrosApiTokenCache';
 
 /**
  * Deployment-specific configuration the Auth0 provider needs, injected by the
@@ -79,6 +81,12 @@ export interface Auth0AuthProviderConfig {
 interface ExchangeSuccessResponse {
   readonly access_token: string;
   readonly expires_in: number;
+  /**
+   * camelCase — a Vectros-specific extension to the RFC 8693 envelope, not
+   * part of the RFC, so not snake_case like the fields above: the token's
+   * resolved `allowedActions`/`identity`, parsed via {@link parseResolvedScope}.
+   */
+  readonly resolvedScope?: unknown;
 }
 
 /** Wire shape of the exchange endpoint's OAuth-standard error envelope (RFC 6749 §5.2). */
@@ -328,9 +336,19 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * server-side, and the loser gets this exact 403 even though the identity now exists and an
    * immediate retry would match it directly (observed live, 2026-08-21 — a StrictMode-driven
    * double-mount fired this exact race in local dev; the underlying hazard isn't StrictMode-specific,
-   * just easiest to trigger there). A single retry after a short delay costs nothing on every OTHER
+   * just easiest to trigger there). A single retry after a short delay costs little on every OTHER
    * cause of a 403 (a missing role, an elevated-scope block, a torn-down context, a still-unresolved
-   * self-signup policy) — those fail again identically.
+   * self-signup policy, a SUSPENDED access profile) — those fail again identically.
+   *
+   * **The suspended-profile cause is new, and it is the one that makes "costs nothing" too
+   * strong.** The exchange used to serve a memoized scope without re-reading the profile's status,
+   * so suspending a profile did not stop this endpoint minting against it for up to five minutes;
+   * it now re-reads that status on every request and refuses immediately with the same uniform
+   * 403. That is a permanent condition, not a race, so a suspended member's every exchange attempt
+   * now costs two real calls to this endpoint rather than one. Deliberately left as is: the
+   * endpoint discloses no cause, so this client cannot suppress the retry for THIS 403 without
+   * suppressing it for the transient one it exists to absorb — and a doubled request on a signed-in
+   * member's own session is a smaller cost than losing the race recovery.
    *
    * **Why `inviteToken` is the one case excluded, not `signupType`.** The race lives entirely
    * inside the server's self-signup path, which the server itself SKIPS whenever an `invite_token`
@@ -363,7 +381,11 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
     readonly signupType?: string;
     readonly contextId?: string;
     readonly skipOwnRetry?: boolean;
-  }): Promise<{ readonly token: string; readonly expiresAtMs: number }> {
+  }): Promise<{
+    readonly token: string;
+    readonly expiresAtMs: number;
+    readonly resolvedScope: PartnerApiResolvedScope;
+  }> {
     let accessToken: string;
     try {
       accessToken = await this.client.getTokenSilently();
@@ -411,7 +433,11 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
       );
     }
     const data = (await resp.json()) as ExchangeSuccessResponse;
-    return { token: data.access_token, expiresAtMs: Date.now() + data.expires_in * 1000 };
+    return {
+      token: data.access_token,
+      expiresAtMs: Date.now() + data.expires_in * 1000,
+      resolvedScope: parseResolvedScope(data.resolvedScope),
+    };
   }
 
   /**
@@ -434,7 +460,11 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
   async mintPartnerApiToken(
     _tenantId?: unknown,
     contextId?: string,
-  ): Promise<{ readonly token: string; readonly expiresAtMs: number }> {
+  ): Promise<{
+    readonly token: string;
+    readonly expiresAtMs: number;
+    readonly resolvedScope: PartnerApiResolvedScope;
+  }> {
     return this.exchangeToken({ ...(contextId ? { contextId } : {}), skipOwnRetry: true });
   }
 

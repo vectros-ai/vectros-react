@@ -23,6 +23,8 @@ import {
   __resetVectrosApiTokenCacheForTest,
   clearVectrosApiTokenCache,
   getVectrosApiToken,
+  getVectrosResolvedScope,
+  parseResolvedScope,
   setPartnerApiTokenMinter,
   setPartnerApiTokenAssumer,
 } from './vectrosApiTokenCache';
@@ -312,5 +314,177 @@ describe('getVectrosApiToken — identity-override path (POST /v1/auth/token/ass
 
     expect(minter).toHaveBeenCalledTimes(2);
     expect(assumer).toHaveBeenCalledTimes(2);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// parseResolvedScope — defensive normalization of the backend's `resolvedScope`
+// field (`{allowedActions: string[], identity: Record<string,string>}`),
+// shared by every provider (auth0.ts, cognito.ts) that parses it off a raw
+// fetch response.
+// -----------------------------------------------------------------------------
+describe('parseResolvedScope', () => {
+  it('parses a well-formed backend response verbatim', () => {
+    expect(
+      parseResolvedScope({ allowedActions: ['records:r:case', 'records:c'], identity: { userId: 'usr_1' } }),
+    ).toEqual({ allowedActions: ['records:r:case', 'records:c'], identity: { userId: 'usr_1' } });
+  });
+
+  it('degrades to empty for null/undefined/non-object input, never throws', () => {
+    expect(parseResolvedScope(null)).toEqual({ allowedActions: [], identity: {} });
+    expect(parseResolvedScope(undefined)).toEqual({ allowedActions: [], identity: {} });
+    expect(parseResolvedScope('not an object')).toEqual({ allowedActions: [], identity: {} });
+    expect(parseResolvedScope(42)).toEqual({ allowedActions: [], identity: {} });
+  });
+
+  it('filters non-string entries out of allowedActions rather than rejecting the whole field', () => {
+    expect(parseResolvedScope({ allowedActions: ['records:r', 42, null, 'records:c'] })).toEqual({
+      allowedActions: ['records:r', 'records:c'],
+      identity: {},
+    });
+  });
+
+  it('drops non-string identity values rather than coercing them', () => {
+    expect(
+      parseResolvedScope({ identity: { 'scope:org': 'org_a', 'scope:client': 42, junk: null } }),
+    ).toEqual({ allowedActions: [], identity: { 'scope:org': 'org_a' } });
+  });
+
+  it('treats an array identity (malformed shape) as absent, not a throw', () => {
+    expect(parseResolvedScope({ identity: ['not', 'a', 'map'] })).toEqual({
+      allowedActions: [],
+      identity: {},
+    });
+  });
+
+  it('treats a non-array allowedActions (malformed shape) as empty, not a throw', () => {
+    expect(parseResolvedScope({ allowedActions: 'not-an-array' })).toEqual({
+      allowedActions: [],
+      identity: {},
+    });
+  });
+});
+
+// -----------------------------------------------------------------------------
+// getVectrosResolvedScope — the server-resolved scope round-trip (mint
+// response → cache → read-back), the replacement for the old client-side
+// JWT/compressed-scope-claim decode useScopeGate used to do.
+// -----------------------------------------------------------------------------
+describe('getVectrosResolvedScope', () => {
+  it('returns the resolvedScope the minter supplied, after delegating the mint to getVectrosApiToken', async () => {
+    const minter = vi.fn().mockResolvedValue({
+      token: 'st_a',
+      expiresAtMs: FAR_FUTURE,
+      resolvedScope: { allowedActions: ['records:r:case'], identity: { userId: 'usr_1' } },
+    });
+    setPartnerApiTokenMinter(minter);
+
+    await expect(getVectrosResolvedScope('tnt_a')).resolves.toEqual({
+      allowedActions: ['records:r:case'],
+      identity: { userId: 'usr_1' },
+    });
+    expect(minter).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the cache-hit slot on a second call — no re-mint, same resolvedScope', async () => {
+    const minter = vi.fn().mockResolvedValue({
+      token: 'st_a',
+      expiresAtMs: FAR_FUTURE,
+      resolvedScope: { allowedActions: ['*'], identity: {} },
+    });
+    setPartnerApiTokenMinter(minter);
+
+    await getVectrosResolvedScope('tnt_a');
+    await expect(getVectrosResolvedScope('tnt_a')).resolves.toEqual({ allowedActions: ['*'], identity: {} });
+    expect(minter).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when the minter supplies no resolvedScope at all (a fork mid-migration)', async () => {
+    setPartnerApiTokenMinter(vi.fn().mockResolvedValue({ token: 'st_a', expiresAtMs: FAR_FUTURE }));
+    await expect(getVectrosResolvedScope('tnt_a')).resolves.toBeNull();
+  });
+
+  it('re-mint replaces the resolvedScope slot (a re-mint within the refresh window picks up the fresh scope)', async () => {
+    setPartnerApiTokenMinter(
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          token: 'st_old',
+          expiresAtMs: NEAR_EXPIRY,
+          resolvedScope: { allowedActions: ['records:r'], identity: {} },
+        })
+        .mockResolvedValueOnce({
+          token: 'st_fresh',
+          expiresAtMs: FAR_FUTURE,
+          resolvedScope: { allowedActions: ['records:r', 'records:c'], identity: {} },
+        }),
+    );
+
+    await expect(getVectrosResolvedScope('tnt_a')).resolves.toEqual({
+      allowedActions: ['records:r'],
+      identity: {},
+    });
+    await expect(getVectrosResolvedScope('tnt_a')).resolves.toEqual({
+      allowedActions: ['records:r', 'records:c'],
+      identity: {},
+    });
+  });
+
+  it('keeps the base and identity-override slots independently readable', async () => {
+    setPartnerApiTokenMinter(
+      vi.fn().mockResolvedValue({
+        token: 'st_base',
+        expiresAtMs: FAR_FUTURE,
+        resolvedScope: { allowedActions: ['records:r'], identity: { userId: 'usr_1' } },
+      }),
+    );
+    setPartnerApiTokenAssumer(
+      vi.fn().mockResolvedValue({
+        token: 'st_assumed',
+        expiresAtMs: FAR_FUTURE,
+        resolvedScope: { allowedActions: ['records:r'], identity: { 'scope:org': 'orgB' } },
+      }),
+    );
+    const override = { namespace: 'scope:org', value: 'orgB' };
+
+    await expect(getVectrosResolvedScope('tnt_a', 'default')).resolves.toEqual({
+      allowedActions: ['records:r'],
+      identity: { userId: 'usr_1' },
+    });
+    await expect(getVectrosResolvedScope('tnt_a', 'default', override)).resolves.toEqual({
+      allowedActions: ['records:r'],
+      identity: { 'scope:org': 'orgB' },
+    });
+  });
+
+  it('clearVectrosApiTokenCache drops the resolvedScope slot too — a re-mint after clear is required', async () => {
+    const minter = vi
+      .fn()
+      .mockResolvedValueOnce({
+        token: 'st_a1',
+        expiresAtMs: FAR_FUTURE,
+        resolvedScope: { allowedActions: ['records:r'], identity: {} },
+      })
+      .mockResolvedValueOnce({
+        token: 'st_a2',
+        expiresAtMs: FAR_FUTURE,
+        resolvedScope: { allowedActions: ['records:r', 'records:c'], identity: {} },
+      });
+    setPartnerApiTokenMinter(minter);
+
+    await getVectrosResolvedScope('tnt_a');
+    clearVectrosApiTokenCache();
+    await expect(getVectrosResolvedScope('tnt_a')).resolves.toEqual({
+      allowedActions: ['records:r', 'records:c'],
+      identity: {},
+    });
+    expect(minter).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects the same way getVectrosApiToken does on a genuine mint failure — never silently null', async () => {
+    setPartnerApiTokenMinter(
+      vi.fn().mockRejectedValue(new Error('mint failed: 401 expired')),
+    );
+    await expect(getVectrosResolvedScope('tnt_a')).rejects.toThrow(/401 expired/);
   });
 });

@@ -25,14 +25,20 @@ look and behave the same without copy-paste:
   choosing which org to act as) — cached in its own slot, separate from the
   base bearer. Omit the assumer entirely for a tenant/context-only app
   (admin-app's shape); the override branch is then simply never reached.
+  `getVectrosResolvedScope` reads the server-resolved `allowedActions`/`identity` for the same slot,
+  sharing the cache's coalescing and retry — which is what `useScopeGate` gates on, rather than
+  decoding the token in the browser.
 - **MFA** — a TOTP enrollment wizard and the `/account` 2FA pattern.
 - **UI primitives** — `AuthCard`, `PasswordField` (+ strength meter), `AppLayout`
   chrome, `IntlProvider` scaffolding, and the tenant/context switchers.
 - **API-error handling** — `ApiErrorAlert` (renders a Vectros API error consistently, including its
   request id) and `RequestIdCaption`, plus the `extractErrorMessage`/`extractRequestId`/
-  `statusCodeOf`/`isVersionConflict` helpers they're built on — pull an error's message, request id,
-  HTTP status, or optimistic-concurrency-conflict flag out of any Vectros SDK error without
-  hand-rolling the same extraction per app.
+  `statusCodeOf`/`isVersionConflict`/`errorCodeOf` helpers they're built on — pull an error's
+  message, request id, HTTP status, optimistic-concurrency-conflict flag, or the API's own
+  machine-readable `errorCode` out of any Vectros SDK error without hand-rolling the same extraction
+  per app. `errorCodeOf` is what separates two causes a status test cannot: `VERSION_CONFLICT`
+  (reload and retry) and `RESOURCE_IN_USE` (retrying the identical request never succeeds) both
+  arrive as HTTP 409.
 - **Schema-driven record UI** — `RecordFormFields` renders a typed input per schema field
   (string/number/boolean/date/enum) from a `FieldDef[]` + `renderHints`, and
   `deriveValueColumns`/`sortRecords`/`payloadMatchesQuery` derive a records-list table (columns,
@@ -73,7 +79,7 @@ Pre-1.0. The API may change between minor versions until the first stable releas
 ## Peer dependencies
 
 The consuming app supplies React 19, MUI 7, Emotion, TanStack Query 5, react-intl,
-react-router 7, and `@vectros-ai/sdk` (all required `peerDependencies`). `aws-amplify`
+react-router 7 or 8, and `@vectros-ai/sdk` (all required `peerDependencies`). `aws-amplify`
 and `@auth0/auth0-spa-js` are **optional** peer dependencies — install whichever
 matches the provider you actually use (`CognitoAuthProvider` needs `aws-amplify`;
 `Auth0AuthProvider` needs `@auth0/auth0-spa-js`); neither is required if you write

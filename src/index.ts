@@ -52,8 +52,15 @@ export type { SearchResultCardProps } from './components/search/SearchResultCard
 
 // API-error extraction helpers (pure, framework-free) — pair with
 // ApiErrorAlert/RequestIdCaption above, or use standalone for a host's own
-// error handling (e.g. `isVersionConflict` to special-case a 409).
-export { extractErrorMessage, extractRequestId, isVersionConflict, statusCodeOf } from './lib/apiError';
+// error handling (e.g. `isVersionConflict` to special-case a 409, or
+// `errorCodeOf` when the status alone does not say which 409 you got).
+export {
+  errorCodeOf,
+  extractErrorMessage,
+  extractRequestId,
+  isVersionConflict,
+  statusCodeOf,
+} from './lib/apiError';
 
 // Schema-driven record UI — typed form inputs + derived list columns from a
 // schema's `FieldDef[]`/`renderHints` (see schema-ui/index.ts for the full

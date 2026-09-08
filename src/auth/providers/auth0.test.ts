@@ -537,6 +537,37 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
 
     await expect(provider().exchangeToken()).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
   });
+
+  it('parses a real resolvedScope field off the exchange response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            access_token: 'st_live_abc',
+            expires_in: 3600,
+            resolvedScope: { allowedActions: ['records:r:case'], identity: { userId: 'usr_1' } },
+          }),
+      }),
+    );
+
+    const result = await provider().exchangeToken();
+    expect(result.resolvedScope).toEqual({ allowedActions: ['records:r:case'], identity: { userId: 'usr_1' } });
+  });
+
+  it('degrades to an empty resolvedScope (not throw) when the response omits the field entirely', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'st_live_abc', expires_in: 3600 }),
+      }),
+    );
+
+    const result = await provider().exchangeToken();
+    expect(result.resolvedScope).toEqual({ allowedActions: [], identity: {} });
+  });
 });
 
 describe('Auth0AuthProvider.acceptInvite', () => {
