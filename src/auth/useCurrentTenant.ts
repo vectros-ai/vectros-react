@@ -12,7 +12,7 @@
 // data source + the identifier type (TenantEnv → TenantId) changed.
 //
 // **Switching** is now a server-side operation: `setTenant(tenantId)` persists
-// the choice (UserSessionPrefsDB) + refreshes the JWT via
+// the choice server-side + refreshes the JWT via
 // `authProvider.setActiveTenant()`, drops the partner-API token cache, and
 // refetches tenant-scoped queries. It's therefore async.
 //

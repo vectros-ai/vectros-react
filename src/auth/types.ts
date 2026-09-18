@@ -81,7 +81,7 @@ export type TenantId = string;
  * entry per membership; pages scope their data reads to the active one.
  *
  * Field shape mirrors the `GET /developer/memberships` response one-to-one
- * (DeveloperMembershipsHandler.TenantMembership) so the adapter mapping is
+ * (the same membership-response shape) so the adapter mapping is
  * trivial. Multi-membership users (e.g. a sub-user of two partners) get one
  * entry per tenant, distinguished by `partnerId`.
  */

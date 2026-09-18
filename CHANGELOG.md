@@ -3,6 +3,40 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.13.0 — 2026-09-17
+
+### Added
+
+- **`schema-ui` now recognizes the `entity` surface.** `schemasForSurface` accepted only
+  `'record' | 'document'`, even though the platform's schema model has always defined a third
+  bindable surface, `entity` (every identity namespace's entities bind under it). A host listing
+  or browsing identity entities had no way to select the schemas that describe them without
+  hand-rolling the filter a second time. Widened to a new exported `SchemaSurface` union
+  (`'record' | 'document' | 'entity'`); every other schema-ui primitive (`RecordFormFields`,
+  `deriveValueColumns`, etc.) was already surface-agnostic and needed no change.
+- **`RecordFormFields` accepts a `disabled` prop.** Every input rendered fully interactive
+  regardless of caller intent, so a host with no write path for a payload (a read-only browser)
+  could only reuse this component by wiring a form that visually invites an edit it then silently
+  discards. `disabled` (default `false`) renders every input disabled and guards every input's
+  `onChange` behind it, so the host's `onChange` is never called while disabled.
+
+### Fixed
+
+- **Two source comments carried repo-relative internal paths** (a sibling reference app's file, in
+  `AuthContext`'s doc comment; an internal conventions doc, in `PasswordField`'s) that resolve to
+  nothing in this package's own public mirror — the mirrored tree root IS the package, so a path
+  outside it is a broken link there even before considering it as an internal reference. Reworded
+  both to state the same guidance without naming an internal file; no behavioral change.
+
+- **One more of the same class, found on a later sweep**: `eslint.config.js`'s header comment named
+  the two consuming reference apps by their monorepo-relative paths. Reworded to name them
+  descriptively instead; no behavioral change.
+
+- **Five more source comments named internal backend classes by name** (in `cognito.ts` x3,
+  `types.ts`, `useCurrentTenant.ts`), describing which backend endpoint/handler a response shape or
+  a persisted-preference mechanism corresponds to. Reworded to describe the mechanism without the
+  class name. No behavioral change.
+
 ## 0.12.0 — 2026-09-07
 
 ### Added

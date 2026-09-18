@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 export { schemasForSurface, distinctTypes } from './schemaSurfaces';
-export type { TypedSchema } from './schemaSurfaces';
+export type { TypedSchema, SchemaSurface } from './schemaSurfaces';
 
 export {
   fieldLabel,

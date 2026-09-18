@@ -23,6 +23,18 @@ describe('schemasForSurface', () => {
     const result = schemasForSurface([{ allowedSurfaces: ['record'] }], 'record');
     expect(result).toEqual([]);
   });
+
+  it('keeps only schemas whose allowedSurfaces includes `entity`', () => {
+    const result = schemasForSurface(
+      [
+        { typeName: 'team', allowedSurfaces: ['entity'] },
+        { typeName: 'patient', allowedSurfaces: ['record'] },
+        { typeName: 'org', allowedSurfaces: ['entity'] },
+      ],
+      'entity',
+    );
+    expect(result.map((s) => s.typeName)).toEqual(['team', 'org']);
+  });
 });
 
 describe('distinctTypes', () => {

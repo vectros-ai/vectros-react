@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RecordFormFields } from './RecordFormFields';
@@ -58,6 +58,75 @@ describe('RecordFormFields', () => {
     const { onChange } = renderFields({ active: true }, {});
     await user.click(screen.getByLabelText('active'));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fieldId: 'active' }), false);
+  });
+
+  it('disables every input, given `disabled`', () => {
+    const onChange = vi.fn();
+    render(
+      <TestIntlProvider>
+        <RecordFormFields
+          fields={FIELDS}
+          value={{ name: 'Acme', active: true, color: 'red' }}
+          errors={{}}
+          disabled
+          onChange={onChange}
+        />
+      </TestIntlProvider>,
+    );
+
+    // A genuinely disabled control can't be clicked at all (userEvent itself
+    // refuses a `pointer-events: none` target), which is the real assertion —
+    // there is no click to fire onChange from in the first place.
+    expect(screen.getByRole('textbox', { name: /name/ })).toBeDisabled();
+    expect(screen.getByLabelText('active')).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: /color/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  it('never calls onChange when disabled, even via a change event dispatched directly (bypassing pointer-events)', () => {
+    const onChange = vi.fn();
+    render(
+      <TestIntlProvider>
+        <RecordFormFields
+          fields={FIELDS}
+          value={{ name: 'Acme', active: true, color: 'red' }}
+          errors={{}}
+          disabled
+          onChange={onChange}
+        />
+      </TestIntlProvider>,
+    );
+    // fireEvent dispatches the DOM event directly, skipping userEvent's own
+    // `pointer-events: none` refusal — this is the guard the disabled prop's
+    // doc comment claims (never reaches the host's onChange), proven against
+    // a path that does NOT rely on the browser refusing the interaction.
+    fireEvent.change(screen.getByRole('textbox', { name: /name/ }), {
+      target: { value: 'Someone Else' },
+    });
+    fireEvent.click(screen.getByLabelText('active'));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('disables number and date/datetime inputs too — they share the plain TextField branch', () => {
+    const fields: FieldDef[] = [
+      { fieldId: 'count', fieldType: 'number' },
+      { fieldId: 'due', fieldType: 'date' },
+    ];
+    render(
+      <TestIntlProvider>
+        <RecordFormFields
+          fields={fields}
+          value={{ count: 3, due: '2026-06-23' }}
+          errors={{}}
+          disabled
+          onChange={vi.fn()}
+        />
+      </TestIntlProvider>,
+    );
+    expect(screen.getByRole('spinbutton', { name: /count/ })).toBeDisabled();
+    expect(screen.getByLabelText('due')).toBeDisabled();
   });
 
   it('applies renderHints: label override, section heading, helpText, and order', () => {

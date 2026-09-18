@@ -56,6 +56,17 @@ export interface RecordFormFieldsProps {
    *  Defaults to `recordForm.rawOnlyNote` — hosts without a raw-JSON view
    *  pass their own. */
   readonly rawOnlyNoteId?: string | undefined;
+  /**
+   * Renders every typed input disabled and guards `onChange` so it is never
+   * called — for a host that has no write path for this payload at all
+   * (e.g. a read-only browser), rather than a form that visually invites an
+   * edit it will silently discard. The guard is explicit (not merely relying
+   * on a disabled DOM input never firing its change event): a call site that
+   * dispatches a change programmatically — a test using `fireEvent`, or a
+   * future input type added here — still can't reach the host's `onChange`.
+   * Defaults to `false`.
+   */
+  readonly disabled?: boolean | undefined;
   /** Reports an edit with the field's raw input (string from text/date/enum,
    *  boolean from a switch); the host coerces to the typed value. */
   readonly onChange: (field: FieldDef, input: string | boolean) => void;
@@ -67,9 +78,15 @@ export function RecordFormFields({
   errors,
   renderHints,
   rawOnlyNoteId,
+  disabled = false,
   onChange,
 }: RecordFormFieldsProps): React.JSX.Element {
   const intl = useIntl();
+
+  // The single choke point every input's onChange is wired through — see
+  // the `disabled` prop's own doc comment for why this is an explicit guard
+  // rather than reliance on a disabled DOM input never firing a change event.
+  const handleChange = disabled ? (): void => {} : onChange;
 
   // Ordered by renderHints.order, then grouped by renderHints.section.
   const sections = groupFieldsBySection(orderedFormFields(fields, renderHints), renderHints);
@@ -101,7 +118,8 @@ export function RecordFormFields({
             control={
               <Switch
                 checked={current === true}
-                onChange={(e) => onChange(field, e.target.checked)}
+                disabled={disabled}
+                onChange={(e) => handleChange(field, e.target.checked)}
               />
             }
             label={label}
@@ -114,13 +132,19 @@ export function RecordFormFields({
     if (field.fieldType === 'enum') {
       const options = enumOptions(field);
       return (
-        <FormControl key={field.fieldId} size="small" error={hasError} sx={{ maxWidth: 480 }}>
+        <FormControl
+          key={field.fieldId}
+          size="small"
+          error={hasError}
+          disabled={disabled}
+          sx={{ maxWidth: 480 }}
+        >
           <InputLabel id={`field-${field.fieldId}-label`}>{labelWithReq}</InputLabel>
           <Select
             labelId={`field-${field.fieldId}-label`}
             label={labelWithReq}
             value={current === undefined || current === null ? '' : String(current)}
-            onChange={(e: SelectChangeEvent) => onChange(field, e.target.value)}
+            onChange={(e: SelectChangeEvent) => handleChange(field, e.target.value)}
           >
             {!field.required && (
               <MenuItem value="">
@@ -171,9 +195,10 @@ export function RecordFormFields({
         multiline={isTextarea}
         minRows={isTextarea ? 3 : undefined}
         value={displayValue}
-        onChange={(e) => onChange(field, e.target.value)}
+        onChange={(e) => handleChange(field, e.target.value)}
         error={hasError}
         helperText={helper}
+        disabled={disabled}
         size="small"
         sx={{ maxWidth: 480 }}
         // Temporal inputs always show a format placeholder → keep the label shrunk.

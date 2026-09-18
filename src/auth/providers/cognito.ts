@@ -79,7 +79,7 @@ import type {
 // Memberships endpoint wire shape.
 //
 // Mirrors `GET {developerApiBase}/developer/memberships` one-to-one
-// (DeveloperMembershipsHandler.TenantMembership). The backend returns a BARE
+// (the backend's own membership-response shape). The backend returns a BARE
 // JSON array; every field is REQUIRED there, so the optional markers + the
 // fallbacks in mapMembership() are defensive only (tolerate partial/legacy
 // rows without dropping a membership the user really has).
@@ -455,7 +455,7 @@ export class CognitoAuthProvider
       const body = await resp.text().catch(() => '');
       throw new AuthError('UNKNOWN', `Failed to switch active tenant: ${resp.status} ${body}`);
     }
-    // DeveloperActiveTenantHandler returns { tenantId, requiresJwtRefresh,
+    // The tenant-switch endpoint returns { tenantId, requiresJwtRefresh,
     // message }. requiresJwtRefresh is false on a no-op switch (the requested
     // tenant was already active).
     const result = (await resp.json().catch(() => ({}))) as {
@@ -501,7 +501,7 @@ export class CognitoAuthProvider
     const resp = await fetch(`${this.config.developerApiBase}/developer/link-invitation`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-      // Backend body field is snake_case `invite_token` (DeveloperLinkInvitationHandler).
+      // Backend body field is snake_case `invite_token`.
       body: JSON.stringify({ invite_token: inviteToken }),
     });
     if (!resp.ok) {

@@ -190,8 +190,7 @@ export function PasswordField({
         error={error}
         helperText={helperText}
         fullWidth
-        // MUI v7 idiom: slotProps over the legacy InputProps. See
-        // CONVENTIONS.md § "Frontend — React + Vite + MUI gotchas".
+        // MUI v7 idiom: slotProps over the legacy InputProps.
         slotProps={{
           input: {
             endAdornment: (

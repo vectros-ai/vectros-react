@@ -4,10 +4,10 @@
 // CognitoAuthProvider implements) — used by this package's OWN tests that
 // need a full mock (AppLayout.test.tsx, CurrentTenantProvider.test.tsx).
 //
-// Mirrors ui/admin-app's and ui/app-vectros-ai's `src/test/mockAuthProvider.ts`
-// (same shape, same defaults) — kept as a separate copy rather than a shared
-// export because packages/react can't depend on either app, but the shape
-// itself should stay in sync with theirs; if you change one, check the others.
+// A near-identical shape (same interface, same defaults) is kept as its own copy in each
+// consuming app's own test tree, rather than a shared export, because those apps can't
+// depend on this package's test-only code — but the shape itself should stay in sync
+// across copies; if you change one, check the others.
 //
 // Every method defaults to a `vi.fn()` with a benign resolved value so a
 // component under test never hits an undefined method; pass `overrides` to

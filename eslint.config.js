@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // ESLint flat config (ESLint 9+) for the @vectros-ai/react library.
 //
-// Aligned with the consuming apps' config (ui/admin-app, ui/app-vectros-ai) but
-// trimmed for a LIBRARY rather than an HMR-served app:
+// Aligned with the consuming reference apps' config (the Admin App, app.vectros.ai)
+// but trimmed for a LIBRARY rather than an HMR-served app:
 //   - no `react-refresh` rule (the package isn't served by Vite HMR; its barrel
 //     intentionally mixes component + non-component exports);
 //   - no `no-restricted-globals` storage guard (that's an app-policy concern;

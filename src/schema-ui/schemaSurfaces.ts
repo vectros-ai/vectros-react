@@ -17,12 +17,21 @@ import type { Vectros } from '@vectros-ai/sdk';
 export type TypedSchema = Vectros.SchemaResponse & { typeName: string };
 
 /**
+ * A typed surface a schema can bind to. Mirrors the platform's own surface
+ * set (`record`, `document`, `user`, `entity`) minus `user` — a `user`-surfaced
+ * schema is account-wide identity governance, not a type a host app lists or
+ * browses the way it does the other three, so it's left out of this union
+ * until a caller actually needs it.
+ */
+export type SchemaSurface = 'record' | 'document' | 'entity';
+
+/**
  * The schemas that define types on `surface`: those with a `typeName` whose
  * `allowedSurfaces` includes it. Declared order is preserved.
  */
 export function schemasForSurface(
   schemas: ReadonlyArray<Vectros.SchemaResponse>,
-  surface: 'record' | 'document',
+  surface: SchemaSurface,
 ): TypedSchema[] {
   return schemas.filter(
     (s): s is TypedSchema =>

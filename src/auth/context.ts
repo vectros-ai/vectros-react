@@ -39,11 +39,10 @@ import type {
  * (`CurrentTenantProvider`) take a `VectrosTenancyProvider` as an explicit
  * prop instead. See `types.ts`'s `VectrosTenancyProvider` doc.
  *
- * A consuming app that always uses one provider (e.g. admin-app is always
- * Cognito/embedded) can narrow this once, in its own `useAuth()` wrapper —
- * see `ui/admin-app/src/auth/index.ts` — so its many call sites keep calling
- * `useAuth().signIn(...)` unchanged, fully typed, with no per-call-site
- * optional-chaining.
+ * A consuming app that always uses one provider (e.g. an app that only ever
+ * runs Cognito/embedded) can narrow this once, in its own `useAuth()`
+ * wrapper, so its many call sites keep calling `useAuth().signIn(...)`
+ * unchanged, fully typed, with no per-call-site optional-chaining.
  */
 export interface AuthContextValue {
   readonly user: AuthUser | null;
