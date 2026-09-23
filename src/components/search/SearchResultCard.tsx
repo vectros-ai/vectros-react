@@ -21,11 +21,16 @@ import type { ReactNode } from 'react';
 import { Box, Card, CardContent, Chip, Link, Stack, Tooltip, Typography } from '@mui/material';
 import type { ChipProps } from '@mui/material';
 
+import { isSafeHref } from './safeHref';
+
 export interface SearchResultCardProps {
   /** The result's display title (from its metadata, or a host-supplied fallback). */
   readonly title: string;
   /** Link target for the title, or `null`/omitted to render plain (non-linked) text —
-   *  e.g. a result the host can't resolve a detail route for. */
+   *  e.g. a result the host can't resolve a detail route for. Only `http:`, `https:`,
+   *  `mailto:`, an in-page `#fragment`, or a rooted path on the same site (`/cases/1`)
+   *  becomes a link; any other value (a script scheme, a protocol-relative URL, a
+   *  relative path) renders the same plain text an omitted `href` does. */
   readonly href?: string | null;
   /** Rendered in place of a plain `<a>` when `href` is set — pass the host router's
    *  own Link component (e.g. `react-router`'s) so navigation stays client-side. */
@@ -76,7 +81,7 @@ export function SearchResultCard({
               <Chip size="small" color={typeColor} variant="outlined" label={typeLabel} />
               {extraChips}
             </Stack>
-            {href ? (
+            {href && isSafeHref(href) ? (
               <Link
                 {...(linkComponent ? { component: linkComponent } : {})}
                 {...(linkComponent ? { to: href } : { href })}

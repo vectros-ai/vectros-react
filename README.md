@@ -49,7 +49,9 @@ look and behave the same without copy-paste:
   so a long-open tab never strands on a stale shell.
 - **Hybrid search UI** — `SearchResultCard` (one hybrid-search hit: source-type chip, title/link,
   snippet, similarity badge, date — the host resolves a raw SDK `search.content()` result into
-  its flat props) and `SearchModeToggle` (the Hybrid/Semantic/Keyword ranking-mode control).
+  its flat props; the title links only for an `http(s):` / `mailto:` URL, an in-page `#fragment`,
+  or a rooted path such as `/cases/1`, and is plain text for any other `href`) and
+  `SearchModeToggle` (the Hybrid/Semantic/Keyword ranking-mode control).
 
 ## Install
 

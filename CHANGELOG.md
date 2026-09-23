@@ -3,6 +3,37 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.14.0 — 2026-09-22
+
+### Changed — breaking
+
+- **`SearchResultCard` links a result only to a safe target; every other `href` now renders as plain
+  text.** It now links only an `http:` or `https:` URL, a `mailto:` URL, an in-page `#fragment`, and
+  a rooted path on the same site (`/cases/1`). Any other value renders the title as plain text, the
+  same as an omitted `href`. The shapes that stop being links:
+  - a script scheme (`javascript:`, `data:`, `vbscript:`, `blob:`, `file:`);
+  - a protocol-relative URL (`//host/x`) and a path that a browser reads as leaving the site
+    (`/\host`, or a slash followed by a tab or line break);
+  - a **relative path with no leading slash** (`cases/1`), which a router link component used to
+    resolve against the current route;
+  - `tel:`, `sms:` and any **custom app scheme** (`myapp://cases/1`);
+  - a value that is not a string.
+
+  **Migration:** a host that passes a rooted path, as the casework reference app does, or an
+  `http(s):`/`mailto:` URL needs no change. A host that passed a relative path adds the leading slash
+  (`/cases/1`). A host that linked a result to `tel:`, `sms:` or an app scheme renders that link itself,
+  outside the card. This is a minor release, not a patch, because a `^0.13.0` range floats only patch
+  versions and a consumer must opt in.
+
+### Changed
+
+- **`Auth0AuthProvider.exchangeToken` now documents that an issuer registered without `restrictedToDomain` refuses
+  the exchange until it is verified (Vectros 0.45.0 and later).** Such an issuer starts as pending verification,
+  and the exchange endpoint answers `404` for it, which reaches your app only as the
+  generic `Token exchange failed: 404 ...`. Verify the issuer with `vectros issuers verify` (`@vectros-ai/cli`
+  0.23.0 or later) before expecting sign-ins; an issuer registered before 0.45.0 is already active and is
+  unaffected. Documentation only: no behavior of the provider changes.
+
 ## 0.13.0 — 2026-09-17
 
 ### Added

@@ -328,6 +328,13 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * the issuer serves exactly one, the common case, which this field's
    * addition doesn't change.
    *
+   * **An issuer registered without `restrictedToDomain` refuses the exchange until it is verified (Vectros
+   * 0.45.0 and later).** Such an issuer starts as `pending_verification` and the
+   * endpoint answers `404` for it, the same answer as for an unknown issuer, so the failure reaches this
+   * app only as the generic `Token exchange failed: 404 ...`. Verify the issuer (`vectros issuers verify`,
+   * `@vectros-ai/cli` 0.23.0 or later) before expecting sign-ins. An issuer registered before 0.45.0 is
+   * already active and is unaffected.
+   *
    * **One bounded retry on a 403 — but NOT when `inviteToken` is set.** The exchange endpoint
    * deliberately returns the SAME generic `403 invalid_grant` for several distinct server-side
    * rejections (uniform-not-found discipline — see the endpoint's own contract doc) — this client
