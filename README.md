@@ -4,7 +4,7 @@
 [![license](https://img.shields.io/npm/l/@vectros-ai/react)](https://www.apache.org/licenses/LICENSE-2.0)
 
 The shared React toolkit behind the Vectros reference apps — **admin-app** (control
-plane) and **app.vectros.ai** (data plane). It packages the parts both apps need to
+plane), **app.vectros.ai** (data plane) and **casework-spa**. It packages the parts both apps need to
 look and behave the same without copy-paste:
 
 - **Provider-agnostic auth** — a minimal `AuthProviderAdapter` core plus purpose-named extension

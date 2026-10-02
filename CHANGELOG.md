@@ -3,6 +3,15 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.15.0 — 2026-10-01
+
+### Added
+
+- **`SchemaSurface` now includes `'user'`.** `schemasForSurface` can select the schemas that govern a
+  user's `payload`, so an app can render it with `RecordFormFields` like a record, document or entity
+  instead of as raw JSON. A `Record<SchemaSurface, …>` or an exhaustive `switch` over `SchemaSurface`
+  needs a `'user'` entry.
+
 ## 0.14.0 — 2026-09-22
 
 ### Changed — breaking

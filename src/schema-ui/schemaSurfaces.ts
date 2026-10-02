@@ -18,12 +18,12 @@ export type TypedSchema = Vectros.SchemaResponse & { typeName: string };
 
 /**
  * A typed surface a schema can bind to. Mirrors the platform's own surface
- * set (`record`, `document`, `user`, `entity`) minus `user` — a `user`-surfaced
- * schema is account-wide identity governance, not a type a host app lists or
- * browses the way it does the other three, so it's left out of this union
- * until a caller actually needs it.
+ * set: `record`, `document`, `entity`, and `user` — a `user`-surfaced schema
+ * governs a `UserResponse`'s `payload`/`schemaId` (identity metadata), the
+ * same schema-driven shape as an `entity`'s payload, just on the identity
+ * model instead of a namespace's entities.
  */
-export type SchemaSurface = 'record' | 'document' | 'entity';
+export type SchemaSurface = 'record' | 'document' | 'entity' | 'user';
 
 /**
  * The schemas that define types on `surface`: those with a `typeName` whose

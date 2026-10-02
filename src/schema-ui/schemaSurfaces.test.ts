@@ -35,6 +35,18 @@ describe('schemasForSurface', () => {
     );
     expect(result.map((s) => s.typeName)).toEqual(['team', 'org']);
   });
+
+  it('keeps only schemas whose allowedSurfaces includes `user`', () => {
+    const result = schemasForSurface(
+      [
+        { typeName: 'employeeProfile', allowedSurfaces: ['user'] },
+        { typeName: 'patient', allowedSurfaces: ['record'] },
+        { typeName: 'agentProfile', allowedSurfaces: ['user'] },
+      ],
+      'user',
+    );
+    expect(result.map((s) => s.typeName)).toEqual(['employeeProfile', 'agentProfile']);
+  });
 });
 
 describe('distinctTypes', () => {
