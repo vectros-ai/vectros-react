@@ -130,7 +130,7 @@ describe('getVectrosApiToken — base (tenant, context) path', () => {
     clearVectrosApiTokenCache(); // bumps the generation while the mint above is still pending
     d.resolve({ token: 'st_stale', expiresAtMs: FAR_FUTURE });
 
-    await expect(inFlight).rejects.toThrow(/cleared during partner-API token mint/);
+    await expect(inFlight).rejects.toThrow(/cleared during Vectros API token mint/);
 
     // The discarded token must not have landed in the cache — a fresh mint runs on the next call.
     const minter2 = vi.fn().mockResolvedValue({ token: 'st_after_clear', expiresAtMs: FAR_FUTURE });

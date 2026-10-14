@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
 // TotpEnrollmentWizard — the TOTP enrollment panel (QR + manual secret + code).
 //
-// PRESENTATIONAL + props-driven on purpose (design § 6.4). It makes NO
+// PRESENTATIONAL + props-driven on purpose. It makes NO
 // auth-session assumption and does no fetching itself, so the SAME component
 // mounts in two containers:
 //   - /account (AccountPage): the container calls authProvider.setUpTotp() to
 //     get { secret, otpauthUri } and, on submit, verifyTotpSetup(code).
-//   - LoginPage (the rare forced-setup-at-login step, § 6.5): the container
+//   - LoginPage (the rare forced-setup-at-login step): the container
 //     feeds the details from the sign-in nextStep and verifies via confirmSignIn.
 //     Rendering inline here — NOT redirecting to /account — avoids the
 //     mid-challenge redirect loop (a user at this step has no session yet).

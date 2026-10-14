@@ -552,7 +552,7 @@ export class CognitoAuthProvider
   ): Promise<{ token: string; expiresAtMs: number; resolvedScope: PartnerApiResolvedScope }> {
     const idToken = await this.getIdToken();
     if (!idToken) {
-      throw new AuthError('INVALID_CREDENTIALS', 'Not authenticated — cannot mint a partner-API token.');
+      throw new AuthError('INVALID_CREDENTIALS', 'Not authenticated — cannot mint a Vectros API token.');
     }
     const kind = await this.resolveTenantKind(tenantId);
     const contextParam = contextId ? `&context=${encodeURIComponent(contextId)}` : '';
@@ -565,7 +565,7 @@ export class CognitoAuthProvider
     });
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new AuthError('UNKNOWN', `Partner-API token mint failed: ${resp.status} ${body}`);
+      throw new AuthError('UNKNOWN', `Vectros API token mint failed: ${resp.status} ${body}`);
     }
     const { token, expiresAt, resolvedScope } = (await resp.json()) as {
       readonly token: string;

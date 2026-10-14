@@ -319,15 +319,15 @@ export function getVectrosApiToken(
     if (!identityOverride) {
       if (!minter) {
         throw new Error(
-          'vectrosApiTokenCache: partner-API token minter not registered. ' +
-            'Call setPartnerApiTokenMinter() at app boot before any partner-API call.',
+          'vectrosApiTokenCache: Vectros API token minter not registered. ' +
+            'Call setPartnerApiTokenMinter() at app boot before any Vectros API call.',
         );
       }
       return minter(tenantId, contextId);
     }
     if (!assumer) {
       throw new Error(
-        'vectrosApiTokenCache: partner-API token assumer not registered. ' +
+        'vectrosApiTokenCache: Vectros API token assumer not registered. ' +
           'Call setPartnerApiTokenAssumer() at app boot before requesting an identity override.',
       );
     }
@@ -391,7 +391,7 @@ export function getVectrosApiToken(
       // identity/context it was minted for is no longer active. Throw the result
       // away rather than caching it for the next-logged-in user or context.
       if (cacheGeneration !== generationAtStart) {
-        throw new Error('Session cleared during partner-API token mint; discarding result.');
+        throw new Error('Session cleared during Vectros API token mint; discarding result.');
       }
 
       cachedTokens.set(key, token);

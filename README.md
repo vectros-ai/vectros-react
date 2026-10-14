@@ -4,8 +4,8 @@
 [![license](https://img.shields.io/npm/l/@vectros-ai/react)](https://www.apache.org/licenses/LICENSE-2.0)
 
 The shared React toolkit behind the Vectros reference apps — **admin-app** (control
-plane), **app.vectros.ai** (data plane) and **casework-spa**. It packages the parts both apps need to
-look and behave the same without copy-paste:
+plane), **app.vectros.ai** (data plane) and **casework-spa**. It packages the parts those apps share
+so they look and behave the same without copy-paste:
 
 - **Provider-agnostic auth** — a minimal `AuthProviderAdapter` core plus purpose-named extension
   interfaces a provider implements only where they genuinely apply: `EmbeddedCredentialAuth`
@@ -28,17 +28,21 @@ look and behave the same without copy-paste:
   `getVectrosResolvedScope` reads the server-resolved `allowedActions`/`identity` for the same slot,
   sharing the cache's coalescing and retry — which is what `useScopeGate` gates on, rather than
   decoding the token in the browser.
-- **MFA** — a TOTP enrollment wizard and the `/account` 2FA pattern.
+- **MFA** — a TOTP enrollment wizard (`TotpEnrollmentWizard`); the account page that hosts it is yours to build.
 - **UI primitives** — `AuthCard`, `PasswordField` (+ strength meter), `AppLayout`
-  chrome, `IntlProvider` scaffolding, and the tenant/context switchers.
+  chrome, and `IntlProvider` scaffolding. No tenant or context switcher component ships: `AppLayout`
+  renders whatever node you pass as its `switcher` prop in the app bar (when signed in), and
+  `CurrentTenantProvider` with the `useCurrentTenant` hook hold the memberships and the active tenant
+  such a switcher reads and changes.
 - **API-error handling** — `ApiErrorAlert` (renders a Vectros API error consistently, including its
   request id) and `RequestIdCaption`, plus the `extractErrorMessage`/`extractRequestId`/
   `statusCodeOf`/`isVersionConflict`/`errorCodeOf` helpers they're built on — pull an error's
-  message, request id, HTTP status, optimistic-concurrency-conflict flag, or the API's own
-  machine-readable `errorCode` out of any Vectros SDK error without hand-rolling the same extraction
-  per app. `errorCodeOf` is what separates two causes a status test cannot: `VERSION_CONFLICT`
-  (reload and retry) and `RESOURCE_IN_USE` (retrying the identical request never succeeds) both
-  arrive as HTTP 409.
+  message, request id, HTTP status, an HTTP 409 test, or the API's own machine-readable `errorCode`
+  out of any Vectros SDK error without hand-rolling the same extraction per app. `isVersionConflict`
+  is a status test only: it is true for any 409, and a 409 means a version conflict only on a
+  versioned record or document update. `errorCodeOf` is what separates two causes a status test
+  cannot: `VERSION_CONFLICT` (reload and retry) and `RESOURCE_IN_USE` (retrying the identical request
+  never succeeds) both arrive as HTTP 409.
 - **Schema-driven record UI** — `RecordFormFields` renders a typed input per schema field
   (string/number/boolean/date/enum) from a `FieldDef[]` + `renderHints`, and
   `deriveValueColumns`/`sortRecords`/`payloadMatchesQuery` derive a records-list table (columns,
@@ -80,8 +84,10 @@ Pre-1.0. The API may change between minor versions until the first stable releas
 
 ## Peer dependencies
 
-The consuming app supplies React 19, MUI 7, Emotion, TanStack Query 5, react-intl,
-react-router 7 or 8, and `@vectros-ai/sdk` (all required `peerDependencies`). `aws-amplify`
+The consuming app supplies React and React DOM 19 or later, MUI (`@mui/material` and
+`@mui/icons-material`) 7 or later, Emotion 11.14 or later, TanStack Query 5 or later, react-intl 10 or
+later, react-router 7 or later, and `@vectros-ai/sdk` 0.9.0 or later (all required
+`peerDependencies`; the ranges have no upper bound). `aws-amplify`
 and `@auth0/auth0-spa-js` are **optional** peer dependencies — install whichever
 matches the provider you actually use (`CognitoAuthProvider` needs `aws-amplify`;
 `Auth0AuthProvider` needs `@auth0/auth0-spa-js`); neither is required if you write
@@ -90,7 +96,7 @@ your own adapter against a different provider. The small leaf utilities (`jose`,
 
 ## Security & trust
 
-These components reach Vectros with least-privilege scoped keys over a secure, per-customer-isolated
+These components reach Vectros with short-lived, least-privilege scoped tokens over a secure, per-customer-isolated
 back-end. For the platform's full security and trust posture, see the
 [compliance and trust guide](https://docs.vectros.ai/guides/operations-trust/compliance).
 

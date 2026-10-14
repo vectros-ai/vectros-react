@@ -3,6 +3,26 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.15.1 — 2026-10-12
+
+### Documentation
+
+- **README corrections.** The package ships no tenant or context switcher component: `AppLayout` renders
+  the node you pass as `switcher`, and `CurrentTenantProvider` with `useCurrentTenant` hold the
+  memberships and the active tenant a switcher reads and changes. `isVersionConflict` is a test for
+  HTTP 409, which means a version conflict only on a versioned record or document update. The peer
+  dependency ranges are open-ended (React 19 or later, react-router 7 or later), not pinned to one
+  major version. The MFA component is `TotpEnrollmentWizard`; the account page that hosts it is the
+  app's own. The components use short-lived scoped tokens.
+- **Source comments state their rules themselves.** The comments on the MFA enrollment component that pointed at
+  internal design documents now say what the rule is, so the source maps that ship with the package read on their own.
+  No behavior changes.
+### Changed
+
+- **Runtime error messages name the Vectros API token.** The messages thrown when no token minter or assumer is
+  registered, when a token mint fails, and when the session is cleared during a mint now say "Vectros API token".
+  `setPartnerApiTokenMinter`, `setPartnerApiTokenAssumer` and the other exported names are unchanged.
+
 ## 0.15.0 — 2026-10-01
 
 ### Added
