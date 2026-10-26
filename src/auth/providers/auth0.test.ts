@@ -74,7 +74,7 @@ describe('Auth0AuthProvider.getCurrentUser', () => {
   // isAuthenticated()+getUser() — to avoid decoding the cached ID token
   // multiple times per call (isAuthenticated() calls getUser() internally in
   // the real SDK; getUser()/getIdTokenClaims() both re-derive from the same
-  // cache entry). See the fix's commit/review note for the measured redundancy.
+  // cache entry).
   it('maps an authenticated Auth0 user onto AuthUser', async () => {
     mockClient.getIdTokenClaims.mockResolvedValue({
       __raw: 'eyJhbGciOi...',
@@ -123,7 +123,7 @@ describe('Auth0AuthProvider.getCurrentUser', () => {
   });
 
   it('refreshes via getTokenSilently BEFORE reading claims, so a stale cached token gets picked up', async () => {
-    // Regression guard for the bug this fixes: getIdTokenClaims() alone is a
+    // Regression guard: getIdTokenClaims() alone is a
     // pure cache read and never refreshes, so a long-lived tab would read a
     // stale/expired entry forever. getTokenSilently() must run first on every
     // call — a cache hit costs nothing extra, but it's the SDK's only call
@@ -239,8 +239,8 @@ describe('Auth0AuthProvider.handleRedirectCallback', () => {
   });
 
   it('does NOT treat an unrelated query param containing "code=" as a real redirect result', async () => {
-    // Regression guard: an earlier version used `search.includes('code=')`,
-    // a substring match that also matches ?promo_code=/?zip_code=/etc. Real
+    // Regression guard: a `search.includes('code=')` substring match would
+    // also match ?promo_code=/?zip_code=/etc. Real
     // detection must match the exact `code`/`error` query-param KEYS.
     resetLocation('/callback?promo_code=SAVE20');
     await provider().handleRedirectCallback();
@@ -254,7 +254,7 @@ describe('Auth0AuthProvider.handleRedirectCallback', () => {
   });
 
   it("maps Auth0's default unverified-email rejection to EMAIL_NOT_VERIFIED, not the generic UNKNOWN", async () => {
-    // Live-tested 2026-08-26: signing up fresh, then immediately attempting
+    // Signing up fresh, then immediately attempting
     // to sign in with email verification required, fails with exactly this
     // shape — Auth0's own default error_description.
     resetLocation('/callback?error=unauthorized&error_description=Please+verify+your+email+before+logging+in.');
@@ -409,10 +409,10 @@ describe('Auth0AuthProvider.exchangeToken / mintPartnerApiToken', () => {
   });
 
   it('mintPartnerApiToken does NOT retry internally on a 403 — deferred entirely to the cache\'s own shared retry', async () => {
-    // Regression guard: mintPartnerApiToken's exchangeToken({contextId}) call used to retry HERE
-    // (this file's own retry, below) AND, on a persistent failure, AGAIN one layer up in
-    // vectrosApiTokenCache.ts's getVectrosApiToken — up to 4 real POSTs to the exchange endpoint
-    // for one ordinary re-mint. mintPartnerApiToken now passes skipOwnRetry, so exactly ONE fetch
+    // Regression guard: if mintPartnerApiToken's exchangeToken({contextId}) call retried HERE
+    // (the provider's own retry) AND, on a persistent failure, AGAIN one layer up in
+    // vectrosApiTokenCache.ts's getVectrosApiToken, one ordinary re-mint would cost up to 4 real
+    // POSTs to the exchange endpoint. mintPartnerApiToken passes skipOwnRetry, so exactly ONE fetch
     // happens here regardless of outcome; see the integration test below for the end-to-end count.
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -603,13 +603,13 @@ describe('Auth0AuthProvider.acceptInvite', () => {
 });
 
 describe('Auth0AuthProvider wired into vectrosApiTokenCache — end-to-end double-retry regression', () => {
-  // The real bug: mintPartnerApiToken() is the ONLY caller vectrosApiTokenCache.ts's
-  // getVectrosApiToken ever mints through (main.tsx wires it via
-  // setPartnerApiTokenMinter). A persistent 403 on a fresh sign-in used to retry inside
-  // exchangeToken() (this file, 2 fetches) AND, once that still failed, again inside the
-  // cache's own SHARED_MINT_RETRY_DELAY_MS retry (2 more fetches) — up to 4 real
-  // `POST /v1/auth/token/exchange` calls in quick succession for ONE mint. This test wires
-  // the two REAL modules together (no mock minter) to pin the fixed, non-stacking count.
+  // mintPartnerApiToken() is the ONLY caller vectrosApiTokenCache.ts's
+  // getVectrosApiToken ever mints through (the app wires it via
+  // setPartnerApiTokenMinter). If a persistent 403 on a fresh sign-in retried inside
+  // exchangeToken() (2 fetches) AND, once that still failed, again inside the
+  // cache's own SHARED_MINT_RETRY_DELAY_MS retry (2 more fetches), one mint would make up to 4 real
+  // `POST /v1/auth/token/exchange` calls in quick succession. This test wires
+  // the two REAL modules together (no mock minter) to pin the non-stacking count.
   afterEach(() => {
     __resetVectrosApiTokenCacheForTest();
     vi.useRealTimers();

@@ -5,9 +5,6 @@
 // else nothing. Factored out so the same correlation id can be shown both in a
 // standalone {@link ApiErrorAlert} and inside another container (e.g. a
 // confirmation dialog's error slot) without duplicating the extract logic.
-//
-// Promoted here (2026-08-28) from three near-byte-identical per-app copies
-// (`admin-app`, `app-vectros-ai`, `casework-spa`).
 // ---------------------------------------------------------------------------
 
 import { Typography } from '@mui/material';

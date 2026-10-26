@@ -10,6 +10,8 @@
 // each module lands during the admin-app extraction.
 // ---------------------------------------------------------------------------
 
+import baseMessages from './i18n/messages.en.json';
+
 export * from './auth';
 
 // UI primitives (presentational; brand/copy injected by the host app).
@@ -83,4 +85,4 @@ export type { IntlProviderProps, MessagesByLocale } from './i18n/IntlProvider';
 // catalog OVER this so they never hand-copy these keys (which drifts):
 //   const MESSAGES = { en: { ...baseMessagesEn, ...appMessagesEn } };
 // App-defined keys win on collision. Add a locale by exporting its companion.
-export { default as baseMessagesEn } from './i18n/messages.en.json';
+export const baseMessagesEn: Readonly<Record<string, string>> = baseMessages;

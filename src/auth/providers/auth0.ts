@@ -114,12 +114,12 @@ interface ExchangeErrorResponse {
 /**
  * Best-effort detection of Auth0's "please verify your email" rejection.
  *
- * Live-tested 2026-08-26: signing up fresh (email verification required on
- * the connection, as it should be) and immediately attempting to sign in
- * fails silently from the user's perspective — no token ever reaches this
- * app, the SDK's `handleRedirectCallback()` throws, and before this fix
- * every such throw mapped to the generic `UNKNOWN` code (a static "something
- * went wrong" with no indication a verification email was even sent). The
+ * Signing up fresh (email verification required on the connection, as it
+ * should be) and immediately attempting to sign in fails silently from the
+ * user's perspective — no token ever reaches this app and the SDK's
+ * `handleRedirectCallback()` throws. Mapping every such throw to the generic
+ * `UNKNOWN` code (a static "something went wrong" with no indication a
+ * verification email was even sent) would hide the real cause. The
  * ONE thing distinguishing it from every other rejection is the error text
  * Auth0 puts on the OAuth error redirect — its documented default is
  * `error=unauthorized&error_description=Please verify your email before
@@ -341,18 +341,17 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * can't tell them apart, and must not guess. But one of those causes is genuinely transient: two
    * near-simultaneous first-time exchanges for the SAME brand-new identity race each other
    * server-side, and the loser gets this exact 403 even though the identity now exists and an
-   * immediate retry would match it directly (observed live, 2026-08-21 — a StrictMode-driven
-   * double-mount fired this exact race in local dev; the underlying hazard isn't StrictMode-specific,
+   * immediate retry would match it directly (a StrictMode-driven
+   * double-mount in local dev can fire this exact race; the underlying hazard isn't StrictMode-specific,
    * just easiest to trigger there). A single retry after a short delay costs little on every OTHER
    * cause of a 403 (a missing role, an elevated-scope block, a torn-down context, a still-unresolved
    * self-signup policy, a SUSPENDED access profile) — those fail again identically.
    *
-   * **The suspended-profile cause is new, and it is the one that makes "costs nothing" too
-   * strong.** The exchange used to serve a memoized scope without re-reading the profile's status,
-   * so suspending a profile did not stop this endpoint minting against it for up to five minutes;
-   * it now re-reads that status on every request and refuses immediately with the same uniform
-   * 403. That is a permanent condition, not a race, so a suspended member's every exchange attempt
-   * now costs two real calls to this endpoint rather than one. Deliberately left as is: the
+   * **The suspended-profile cause is the one that makes "costs nothing" too strong.** The
+   * exchange re-reads the profile's status on every request and refuses a suspended profile
+   * immediately with the same uniform 403. That is a permanent condition, not a race, so a
+   * suspended member's every exchange attempt costs two real calls to this endpoint rather than
+   * one. Deliberately kept: the
    * endpoint discloses no cause, so this client cannot suppress the retry for THIS 403 without
    * suppressing it for the transient one it exists to absorb — and a doubled request on a signed-in
    * member's own session is a smaller cost than losing the race recovery.
@@ -370,16 +369,16 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * ordinary cache-driven re-mint does, so it stays covered by the retry.
    *
    * **`skipOwnRetry` — internal, set ONLY by {@link mintPartnerApiToken}.** This same 403 race is
-   * now ALSO retried one layer up, inside `vectrosApiTokenCache.ts`'s own `getVectrosApiToken`
-   * (`SHARED_MINT_RETRY_DELAY_MS`, added 2026-08-26, five days after this retry) — a
+   * ALSO retried one layer up, inside `vectrosApiTokenCache.ts`'s own `getVectrosApiToken`
+   * (`SHARED_MINT_RETRY_DELAY_MS`) — a
    * provider-agnostic retry that additionally coalesces every consumer arriving during the delay
-   * window onto ONE shared attempt, which a per-call retry here structurally cannot do. Every
-   * ordinary re-mint (`mintPartnerApiToken`, the cache's only caller) went through BOTH layers
-   * unreconciled: a persistent 403 retried here (2 fetches), THEN again one layer up on the cache's
-   * own retry (2 more fetches) — up to 4 real `POST /v1/auth/token/exchange` calls in quick
-   * succession for one mint, measured live on a fresh sign-in right after invite-accept.
+   * window onto ONE shared attempt, which a per-call retry here structurally cannot do. Without
+   * this flag, every ordinary re-mint (`mintPartnerApiToken`, the cache's only caller) would go
+   * through BOTH layers: a persistent 403 retried here (2 fetches), THEN again one layer up on the
+   * cache's own retry (2 more fetches) — up to 4 real `POST /v1/auth/token/exchange` calls in quick
+   * succession for one mint.
    * `mintPartnerApiToken` sets this to defer the race ENTIRELY to the cache's shared retry, so the
-   * two layers no longer stack. A direct `exchangeToken()` call that bypasses the cache (self-signup
+   * two layers do not stack. A direct `exchangeToken()` call that bypasses the cache (self-signup
    * via `signupType`, `acceptInvite`) leaves this unset and keeps its own retry — nothing else
    * covers that race for those callers.
    */
@@ -457,11 +456,11 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
    * `contextId` IS forwarded (0.40.0): when the issuer is registered against
    * more than one app context, this is how the cache's per-(tenant, context)
    * mint disambiguates which one to target. Omitted/undefined when the
-   * issuer serves exactly one — unaffected by this field's addition.
+   * issuer serves exactly one.
    *
    * `skipOwnRetry: true` — this is THE cache-driven path, so the 403-race
    * retry is left entirely to `vectrosApiTokenCache.ts`'s own shared retry;
-   * see `exchangeToken`'s doc for why stacking both here produced up to 4
+   * see `exchangeToken`'s doc for why stacking both here would produce up to 4
    * real exchange calls for one mint.
    */
   async mintPartnerApiToken(

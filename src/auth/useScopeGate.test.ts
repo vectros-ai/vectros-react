@@ -9,10 +9,7 @@
 // setPartnerApiTokenMinter seam (vectrosApiTokenCache.ts), not a mocked
 // module — same idiom vectrosApiTokenCache.test.ts uses.
 // useScopeGate reads the mint response's server-resolved `resolvedScope`
-// field directly; it no longer decodes a token client-side at all (that
-// machinery — decodeAllowedActions/decodeIdentity/scopeCompression.ts — was
-// retired in the same change, see this file's own history for the decode
-// tests that used to live here).
+// field directly; it never decodes a token client-side.
 // ---------------------------------------------------------------------------
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -65,9 +62,8 @@ describe('canPerform', () => {
 
   test('a combined qualified entry satisfies a narrower SAME-qualifier ask', () => {
     // The exact shape a role's `allowedActions: [records:crud:case]` clause
-    // produces — measured live against a real deployment, where a gated nav
-    // item stayed silently hidden because this case fell through to
-    // exact-match denial.
+    // produces. Without this rule a gated nav item would stay silently hidden,
+    // because this case would fall through to exact-match denial.
     expect(canPerform(['records:crud:case'], 'records:r:case')).toBe(true);
     expect(canPerform(['records:crud:case'], 'records:cr:case')).toBe(true);
     expect(canPerform(['records:crud:case'], 'records:crud:case')).toBe(true);
@@ -113,11 +109,9 @@ describe('canPerform', () => {
   // The `x` (execute) op letter.
   //
   // Cells are labelled EVIDENCE or PINS. An EVIDENCE cell fails against an
-  // ops-letter set lacking `x` and so proves the fix; a PINS cell passes either
+  // ops-letter set lacking `x` and so demonstrates the behaviour; a PINS cell passes either
   // way and is here to hold a documented promise still, not to demonstrate
-  // anything. Both are worth keeping and only one is worth citing — an earlier
-  // version of this block claimed every cell was the first kind, which was
-  // wrong for five of them.
+  // anything. Both are worth keeping and only the first kind is evidence.
   // ---------------------------------------------------------------------------
   test('a combined entry carrying x satisfies a narrower x ask', () => {
     expect(canPerform(['scripts:cx'], 'scripts:x')).toBe(true); // EVIDENCE
@@ -130,7 +124,7 @@ describe('canPerform', () => {
     expect(canPerform(['scripts:c', 'scripts:x'], 'scripts:crx')).toBe(false); // PINS
   });
 
-  test('a grant that merely MENTIONS x no longer poisons asks for its other letters', () => {
+  test('a grant that merely MENTIONS x does not poison asks for its other letters', () => {
     // The sharp end of an unrecognized letter: `scripts:rx` stops parsing as an
     // ops string entirely, so it contributes nothing to the union and an ask for
     // the wholly unrelated `r` it grants falls through to an exact-match denial.
@@ -143,9 +137,9 @@ describe('canPerform', () => {
   });
 
   test('the plainest execute grant answers the plainest execute ask', () => {
-    // PINS, and deliberately so: the exact-string fallback already answered this
-    // correctly before the fix, which is exactly why the defect looked narrower
-    // than it was. It is the feature's happy path and the shape a consumer will
+    // PINS, and deliberately so: the exact-string fallback answers this
+    // correctly even without the `x` op letter, so this cell cannot demonstrate
+    // the letter's support. It is the feature's happy path and the shape a consumer will
     // write first, so it should not depend on a fallback nobody is watching.
     expect(canPerform(['scripts:x'], 'scripts:x')).toBe(true);
     expect(canPerform(['*'], 'scripts:x')).toBe(true);
@@ -193,8 +187,8 @@ describe('canPerform', () => {
   });
 
   test('x on a resource that ignores it is answered, not withheld — matching the platform', () => {
-    // EVIDENCE, and the one place this change genuinely answers `true` where it
-    // used to answer `false` outside `scripts`. The letter is grammatically
+    // EVIDENCE, and the one case that answers `true` for a letter that acts
+    // only on `scripts`. The letter is grammatically
     // valid everywhere and acts only on `scripts`, so `records:x` authors
     // cleanly and grants nothing; no gate ever asks it. Mirroring the
     // authorizer's own answer is the correct behaviour, and pretending
@@ -236,19 +230,17 @@ describe('isOpsString', () => {
 // useScopeGate — loading/resolved state, identity, and the mint-retry
 // recovery observed through a failure+recovery cycle.
 //
-// The one-shot retry that makes this recover no longer lives IN this hook —
-// it moved down into vectrosApiTokenCache.ts's getVectrosApiToken itself
-// (2026-08-26; see that module's SHARED_MINT_RETRY_DELAY_MS doc), because
+// The one-shot retry that makes this recover does not live IN this hook —
+// it lives in vectrosApiTokenCache.ts's getVectrosApiToken itself
+// (see that module's SHARED_MINT_RETRY_DELAY_MS doc), because
 // several independent useScopeGate call sites (nav items gating different
 // actions) mount around the same moment, and a per-hook-instance retry
 // couldn't stop each one from independently racing its OWN fresh mint the
-// instant a predecessor's failure cleared the shared slot — measured live as
-// 2-3 separate 403s for a single page load. These tests still exercise
-// useScopeGate itself (via the REAL getVectrosApiToken/setPartnerApiTokenMinter
+// instant a predecessor's failure cleared the shared slot. These tests
+// exercise useScopeGate itself (via the REAL getVectrosApiToken/setPartnerApiTokenMinter
 // seam, same pattern as vectrosApiTokenCache.test.ts, rather than mocking the
-// module) — they're pinning that the hook still recovers correctly now that
-// the retry mechanism sits one layer down, not asserting anything about
-// where the retry lives.
+// module) — they pin that the hook recovers correctly with the retry
+// mechanism one layer down, not anything about where the retry lives.
 // -----------------------------------------------------------------------------
 describe('useScopeGate', () => {
   afterEach(() => {

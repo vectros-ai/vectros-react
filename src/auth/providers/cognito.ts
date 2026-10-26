@@ -178,8 +178,8 @@ function isLingeringSessionError(e: unknown): boolean {
   if (e.name === 'UserAlreadyAuthenticatedException') return true;
   // The revoked case shares NotAuthorizedException with bad credentials, so it's
   // distinguished by message. This keys on Amplify's English string — if that
-  // ever changes, the self-heal simply stops engaging (login wedges as it did
-  // before this fix); it never misclassifies a failure as success.
+  // ever changes, the self-heal simply stops engaging (a lingering session keeps
+  // wedging login); it never misclassifies a failure as success.
   return e.name === 'NotAuthorizedException' && /revoked/i.test(e.message);
 }
 

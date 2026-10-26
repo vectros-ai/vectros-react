@@ -57,7 +57,7 @@ describe('getVectrosApiToken — base (tenant, context) path', () => {
     await expect(getVectrosApiToken('tnt_a')).rejects.toThrow(/minter not registered/);
   });
 
-  it('a mint attempted before the minter is registered does NOT permanently poison the slot — the whole point of the regression this file guards', async () => {
+  it('a mint attempted before the minter is registered does NOT permanently poison the slot — the point of this file', async () => {
     // The exact real-world shape: something calls getVectrosApiToken (e.g. a
     // gated nav item's ScopeGate mounting) before app boot has registered a
     // minter yet.
@@ -139,15 +139,14 @@ describe('getVectrosApiToken — base (tenant, context) path', () => {
   });
 
   it('a failed mint retries ONCE internally, within the SAME call — no separate second call needed', async () => {
-    // Live-tested 2026-08-26: a token exchange for an identity JUST activated
+    // A token exchange for an identity JUST activated
     // (e.g. right after a successful invite-accept) can still 403 on its very
     // next exchange — a real backend-side race/staleness. This retry lives
     // HERE (not in each individual consumer, e.g. useScopeGate) specifically
     // so every consumer benefits uniformly and so near-concurrent callers can
-    // share ONE retry — see the next test. Supersedes an earlier version of
-    // this test (2026-08-21) that expected the OLD design — reject on the
-    // first call, succeed on a separate second call — before the retry moved
-    // inside the same in-flight promise.
+    // share ONE retry — see the next test. The retry happens inside the same
+    // in-flight promise, so the first call succeeds; a separate second call is
+    // not needed.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let attempt = 0;
     setPartnerApiTokenMinter(async () => {
@@ -199,11 +198,11 @@ describe('getVectrosApiToken — base (tenant, context) path', () => {
   });
 
   it('a SECOND caller arriving DURING the retry delay window joins the SAME retry — does not start its own independent mint', async () => {
-    // The actual bug this retry-in-the-cache design fixes: several
+    // What this retry-in-the-cache design guards against: several
     // independent UI consumers (e.g. one useScopeGate per gated nav item)
-    // each call getVectrosApiToken around the same moment. Before this, each
-    // one raced its own fresh mint the instant the FIRST failure cleared the
-    // slot — measured live as 2-3 separate 403s for one page load. Now the
+    // each call getVectrosApiToken around the same moment. Without it, each
+    // one would race its own fresh mint the instant the FIRST failure cleared the
+    // slot. The
     // whole attempt+delay+retry sequence stays as ONE in-flight promise, so
     // a caller arriving mid-delay joins it instead of starting its own.
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -367,8 +366,8 @@ describe('parseResolvedScope', () => {
 
 // -----------------------------------------------------------------------------
 // getVectrosResolvedScope — the server-resolved scope round-trip (mint
-// response → cache → read-back), the replacement for the old client-side
-// JWT/compressed-scope-claim decode useScopeGate used to do.
+// response → cache → read-back), which spares useScopeGate any client-side
+// JWT/compressed-scope-claim decode.
 // -----------------------------------------------------------------------------
 describe('getVectrosResolvedScope', () => {
   it('returns the resolvedScope the minter supplied, after delegating the mint to getVectrosApiToken', async () => {

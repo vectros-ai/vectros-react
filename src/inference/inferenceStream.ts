@@ -10,6 +10,8 @@
 // All three inference endpoints (chat / RAG / document-ask) return an SSE
 // `Stream<T>` (an AsyncIterable) of a **discriminated union keyed by `event`**:
 //   - content_delta  → a chunk of generated text (all three)
+//   - reasoning_delta → a chunk of the model's reasoning, sent only when the request
+//                       asked for it (all three); never part of the answer text
 //   - done           → terminal usage/billing summary (all three)
 //   - error          → terminal error (all three)
 //   - search_results / truncation_warning → RAG only (grounding + budget trim)
@@ -38,6 +40,7 @@ export interface TruncationWarning {
 /** The union of every event the three inference endpoints can emit (keyed by `event`). */
 export type InferenceStreamEvent =
   | { readonly event: 'content_delta'; readonly delta: string }
+  | { readonly event: 'reasoning_delta'; readonly delta: string }
   | ({ readonly event: 'done' } & DoneEvent)
   | { readonly event: 'error'; readonly message: string; readonly code: string }
   | {
@@ -51,13 +54,51 @@ export type InferenceStreamEvent =
 
 export type InferenceStreamStatus = 'idle' | 'streaming' | 'done' | 'error';
 
+/**
+ * The terminal error of an inference stream.
+ *
+ * It has two sources, and one run can produce both; the later one replaces the
+ * earlier:
+ * - An `error` event in the stream. `code` is the event's own machine-readable
+ *   code (for example `inference_error`), and `status` and `errorCode` are
+ *   absent.
+ * - An error thrown by the runner, or while the stream is being read (a request
+ *   the API refused before the stream starts, with HTTP 400, 403, 404, 409, 429,
+ *   5xx and so on, surfaces this way; `state.text` keeps what had arrived).
+ *   `code` is `'stream_error'`. `message` is the thrown error's message (for an
+ *   SDK error that is the SDK's multi-line text, status and body included), or
+ *   `'Inference stream failed.'` when what was thrown is not an `Error`.
+ *   `status`, `errorCode` and `detail` carry the structured fields of the thrown
+ *   error when it has them, so an app can choose its own copy without parsing `message`.
+ */
+export interface InferenceStreamError {
+  readonly message: string;
+  readonly code: string;
+  /** HTTP status of the thrown error, when it carries one. Absent for a stream `error` event or a failure with no response. */
+  readonly status?: number;
+  /**
+   * The API's own machine-readable `errorCode` from the error response body
+   * (for example `RATE_LIMITED`). Absent when the response names no cause —
+   * many 4xx responses carry only a message — so treat `undefined` as
+   * "unspecified", and an unrecognised value as unknown.
+   */
+  readonly errorCode?: string;
+  /**
+   * The API's own client-facing message from the error response body, without
+   * the SDK's wrapper text (class name, status line, JSON). Absent for a stream
+   * `error` event and for a failure whose response carries no message. Safe to
+   * show to an end user; prefer it to `message` when `status` is set.
+   */
+  readonly detail?: string;
+}
+
 /** The folded view of an in-flight (or finished) inference stream. */
 export interface InferenceStreamState {
   readonly status: InferenceStreamStatus;
   /** Accumulated assistant text (concatenated content_delta chunks). */
   readonly text: string;
   /** Terminal error (status === 'error'). */
-  readonly error?: { readonly message: string; readonly code: string };
+  readonly error?: InferenceStreamError;
   /** Terminal usage/billing summary (status === 'done'). */
   readonly usage?: DoneEvent;
   /** RAG grounding results — drives the citations rail. */
@@ -91,6 +132,9 @@ export function reduceInferenceEvent(
   switch (event.event) {
     case 'content_delta':
       return { ...state, status: 'streaming', text: state.text + (event.delta ?? '') };
+    case 'reasoning_delta':
+      // Reasoning is not part of the answer: it is never folded into `text`.
+      return state;
     case 'search_results':
       return {
         ...state,

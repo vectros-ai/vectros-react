@@ -9,9 +9,6 @@
 //
 // The friendly copy is the host's responsibility — pass it as children (usually
 // a <FormattedMessage>). The reference line's own label is localized here.
-//
-// Promoted here (2026-08-28) from three near-byte-identical per-app copies
-// (`admin-app`, `app-vectros-ai`, `casework-spa`).
 // ---------------------------------------------------------------------------
 
 import type { ReactNode } from 'react';

@@ -3,6 +3,43 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.16.0 — 2026-10-25
+
+### Breaking changes
+
+- **BREAKING (types): `InferenceStreamEvent` gains a `reasoning_delta` member.** SDK 0.48.0 adds a `reasoning_delta` event to
+  the chat, RAG and document-ask streams (sent only when a request sets `reasoning` to `"stream"`), and those streams now
+  type-check when you pass them to `useInferenceStream`. `reduceInferenceEvent` leaves the state unchanged for it: reasoning is
+  never added to `text`. **Migration:** a `switch` on `event.event` that ends with a `never` check needs a
+  `case 'reasoning_delta'`, or its own `tsc` run fails.
+
+### Added
+
+- **`useInferenceStream` reports the HTTP status and API error code of a thrown error.** `state.error` carries `status`, the
+  HTTP status, and `errorCode`, the API's own machine-readable code when the error response names one (for example
+  `RATE_LIMITED`). This covers a request the API refused before the stream started (HTTP 400, 403, 404, 409, 429 and so on)
+  and a server error alike, so an app can choose its own message. Both fields are absent for a stream `error` event and for a
+  failure that had no response, such as a network error. `message` and `code: 'stream_error'` are unchanged. The error type is
+  exported as `InferenceStreamError`.
+- **`useInferenceStream` reports the API's own message as `state.error.detail`,** for example that a busy pre-paid balance is
+  not a shortage and the call can be retried. For a thrown error `message` is still the SDK's multi-line text. `detail` is
+  absent for a stream `error` event and for a response that carries no message.
+
+### Changed
+
+- **`baseMessagesEn` is typed `Readonly<Record<string, string>>`.** Spreading it into a message catalog is unchanged;
+  `keyof typeof baseMessagesEn` is now `string`.
+- **The package description names casework-spa among the reference apps.**
+- **The `isVersionConflict` documentation says a `409` on a record or document update means the item changed while your update
+  was in flight, whether or not you sent `expectedVersion`.** The function is unchanged.
+- **The comments in the shipped code describe the code as it is today.** Behaviour is unchanged.
+
+### Fixed
+
+- **`require('@vectros-ai/react')` loads the CommonJS build, and the type declarations compile with `skipLibCheck: false`.**
+  The CommonJS files use the `.cjs` extension and the `exports` map names separate `types` for `import` and `require`.
+  `import` resolves to the same files as before.
+
 ## 0.15.1 — 2026-10-12
 
 ### Documentation

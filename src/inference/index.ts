@@ -9,6 +9,7 @@ export {
   reduceInferenceEvent,
 } from './inferenceStream';
 export type {
+  InferenceStreamError,
   InferenceStreamEvent,
   InferenceStreamStatus,
   InferenceStreamState,

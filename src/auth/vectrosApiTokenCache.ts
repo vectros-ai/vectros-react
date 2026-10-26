@@ -56,12 +56,10 @@
 // re-exchanging every time. Same refresh/coalescing/generation-counter
 // machinery as the base path — see `getVectrosApiToken`'s override branch.
 //
-// Named `*Override`/`*Assumer` rather than `*Switch(er)` deliberately — an
-// earlier draft of this axis was built against a since-deleted `/switch`
-// endpoint design (a broader entitlement check found unsound before it
-// shipped). This module was renamed to match the endpoint that actually
-// exists, `POST /v1/auth/token/assume`, entitlement checked against a single
-// requested value at a time, never inferred from broader read/write reach.
+// Named `*Override`/`*Assumer` rather than `*Switch(er)` deliberately — to
+// match the endpoint, `POST /v1/auth/token/assume`, whose entitlement is
+// checked against a single requested value at a time, never inferred from
+// broader read/write reach.
 // ---------------------------------------------------------------------------
 
 import type { TenantId } from './types';
@@ -136,20 +134,20 @@ const REFRESH_BEFORE_MS = 60_000;
  * How long to wait before ONE shared retry of a failed mint, still within the
  * SAME in-flight promise (see the retry block in {@link getVectrosApiToken}).
  *
- * Live-tested 2026-08-26: a token exchange for an identity that was JUST
+ * A token exchange for an identity that was JUST
  * activated (e.g. the moment `RequireAuth` renders the authenticated shell,
  * right after a successful invite-accept) can still 403 on its very next
- * exchange — a real, observed backend-side race/staleness right after
- * activation (filed separately, platform-side). Several DIFFERENT UI
+ * exchange — a backend-side race/staleness right after
+ * activation. Several DIFFERENT UI
  * consumers (nav items' own `ScopeGate`s, etc.) each call `getVectrosApiToken`
- * independently around the same moment; without this, EACH one raced its own
- * fresh mint, so one failure didn't stop three more identical failures a
- * beat later — measured live as 2-3 separate 403s for a SINGLE page load.
+ * independently around the same moment; without a shared retry, EACH one
+ * would race its own fresh mint, so one failure wouldn't stop several more
+ * identical failures a beat later.
  * Keeping the retry INSIDE this same in-flight promise (rather than, say,
  * each caller retrying on its own after catching a rejection) means any
  * caller arriving during the delay/retry window JOINS this one attempt
- * instead of starting an independent one of its own — collapsing what were
- * several racing failures into one shared recovery.
+ * instead of starting an independent one of its own — collapsing several
+ * racing failures into one shared recovery.
  */
 const SHARED_MINT_RETRY_DELAY_MS = 1500;
 
@@ -309,7 +307,7 @@ export function getVectrosApiToken(
    * How to get a fresh token for THIS slot — the one thing that differs
    * between the base path and the override path. Not invoked until the IIFE
    * below actually starts (still synchronous up to here, so the in-flight
-   * Map.set above happens before any await, same as before this branch existed).
+   * Map.set above happens before any await).
    */
   const fetchFresh = (): Promise<{
     readonly token: string;

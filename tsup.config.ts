@@ -28,7 +28,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: ['src/index.ts', 'src/auth/providers/cognito.ts', 'src/auth/providers/auth0.ts'],
   format: ['esm', 'cjs'],
-  outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.js' }),
+  outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.cjs' }),
   dts: true,
   clean: true,
   sourcemap: true,

@@ -17,7 +17,7 @@ so they look and behave the same without copy-paste:
 - **Vectros API token cache** — short-lived `st_*` bearers minted on demand and
   cached per `(tenant, context)`, with concurrent-mint coalescing and a
   clear-during-mint race guard. The mint function is **injected**
-  (`setPartnerApiTokenMinter`), so the `/developer/*` call stays inside the
+  (`setPartnerApiTokenMinter`), so the token-minting call stays inside the
   swap point. Optionally also register `setPartnerApiTokenAssumer` and pass a
   third `{ namespace: 'scope:<ns>', value }` argument to `getVectrosApiToken`
   to get back a bearer with that identity namespace assumed to a different
@@ -39,10 +39,37 @@ so they look and behave the same without copy-paste:
   `statusCodeOf`/`isVersionConflict`/`errorCodeOf` helpers they're built on — pull an error's
   message, request id, HTTP status, an HTTP 409 test, or the API's own machine-readable `errorCode`
   out of any Vectros SDK error without hand-rolling the same extraction per app. `isVersionConflict`
-  is a status test only: it is true for any 409, and a 409 means a version conflict only on a
-  versioned record or document update. `errorCodeOf` is what separates two causes a status test
+  is a status test only: it is true for any 409. On a record or document update a 409 means the item
+  changed while your update was in flight, whether or not you sent `expectedVersion`; other routes answer
+  409 for other reasons, such as deleting a schema that records, documents, users or entities still use. `errorCodeOf` is what separates two causes a status test
   cannot: `VERSION_CONFLICT` (reload and retry) and `RESOURCE_IN_USE` (retrying the identical request
   never succeeds) both arrive as HTTP 409.
+- **Streaming inference state** — `useInferenceStream` runs a chat, RAG or document-ask stream and folds
+  it into render state (`state.text`, `state.citations`, `state.usage`, `state.status`), with `run`,
+  `cancel` and `reset`. You pass the SDK call as a runner, for example
+  `run(({ abortSignal }) => client.inference.ragInference(request, { abortSignal }))`. When a run fails,
+  `state.status` is `'error'` and `state.error` is an object of the exported type `InferenceStreamError`:
+  - `message` and `code` are always set. For an `error` event in the stream, they are that event's own
+    message and code. For an error thrown by the runner or while the stream is read, `code` is
+    `'stream_error'` and `message` is the thrown error's message — for an SDK error, the SDK's multi-line
+    text with the status and response body in it, so do not show it to end users as is — or
+    `'Inference stream failed.'` when what was thrown is not an `Error`. If a run produces both an `error`
+    event and a thrown error, the later one replaces the earlier.
+  - `status` is the HTTP status of the thrown error, when it carries one, whatever the status: a request
+    the API refused before the stream started (400, 403, 404, 409, 429 and so on) or a server error
+    (5xx). It does not mean nothing was streamed, because an error thrown while the stream is being read
+    keeps the text received so far in `state.text`. It is `undefined` for a stream `error` event and for
+    a failure with no response, such as a network error.
+  - `errorCode` is the API's own machine-readable code from the error response (for example
+    `RATE_LIMITED`), when the response names one. Many 4xx responses carry only a message, so
+    `undefined` means the API did not name a cause. Treat an unrecognised value as unknown.
+  - `detail` is the API's own client-facing message from the error response (for example "Your pre-paid
+    inference balance is busy with other concurrent requests. This is not a shortage: retry in a moment."),
+    without the SDK's wrapper text. It is `undefined` for a stream `error` event and when the response
+    carries no message. When `status` is set, show `detail` rather than `message`, and your own line
+    naming the status when `detail` is `undefined`.
+
+  Together, `status`, `errorCode` and `detail` let you choose your own copy without wrapping the runner.
 - **Schema-driven record UI** — `RecordFormFields` renders a typed input per schema field
   (string/number/boolean/date/enum) from a `FieldDef[]` + `renderHints`, and
   `deriveValueColumns`/`sortRecords`/`payloadMatchesQuery` derive a records-list table (columns,

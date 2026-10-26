@@ -13,23 +13,22 @@
 // `getVectrosResolvedScope` (vectrosApiTokenCache.ts) — it never decodes the
 // token itself.
 //
-// **This replaces a client-side JWT/compressed-`scope`-claim decode this file
-// used to do.** That approach required a SECOND-LANGUAGE decoder for the
-// platform's compressed `scope` claim — a duplicated preset DEFLATE
-// dictionary in this package that could silently drift from the backend's
-// own copy. The backend now resolves the SAME plaintext data it's about to
-// compress and hands the plaintext back directly, so there's nothing left to
-// decode (or drift) on this side.
+// **Why the token's compressed `scope` claim is not decoded client-side.**
+// That would need a SECOND-LANGUAGE decoder for the platform's compressed
+// `scope` claim — a duplicated preset DEFLATE dictionary in this package that
+// could silently drift from the backend's own copy. The backend instead
+// resolves the SAME plaintext data it's about to compress and hands the
+// plaintext back directly, so there's nothing to decode (or drift) on this
+// side.
 //
-// **No signature verification on the resolved scope either** — same as the
-// old client-side decode: the backend re-verifies scope on every real
+// **No signature verification on the resolved scope either**: the backend
+// re-verifies scope on every real
 // request, so a client-visible value (however it arrives) is a UX
 // optimization only. Nothing gated here is a security boundary; a tampered
 // value buys a rendered button and a refusal from the API behind it.
 //
-// **What this hook CAN get wrong, in both directions.** An earlier version of
-// this note claimed the worst case was showing surface the API then rejects,
-// "never the reverse". That is not true and the reverse is the likelier half:
+// **What this hook CAN get wrong, in both directions.** The worst case is not
+// only showing surface the API then rejects; the reverse is the likelier half:
 // `canPerform` answers conservatively wherever it cannot prove a grant, so it
 // can HIDE surface the caller is in fact entitled to — an unqualified grant
 // does not satisfy a qualified ask, and the platform's own authorizer is wider
@@ -252,9 +251,9 @@ export function useScopeGate(tenantOverride?: TenantId): ScopeGateValue {
     // switching tenants briefly gates routes on the old tenant's scope.
     setResolved(null);
 
-    // The retry-on-a-failed-mint logic used to live here, per hook instance.
-    // Moved DOWN into vectrosApiTokenCache.ts's getVectrosApiToken itself
-    // (2026-08-26) — several independent consumers (this hook, on nav items
+    // The retry-on-a-failed-mint logic lives in vectrosApiTokenCache.ts's
+    // getVectrosApiToken itself, not per hook instance — several independent
+    // consumers (this hook, on nav items
     // for different actions) each call getVectrosApiToken (and
     // getVectrosResolvedScope, which delegates to it) around the same moment,
     // and a per-instance retry here couldn't stop each one from independently

@@ -9,10 +9,8 @@
 // the SDK's error classes (keeping them trivially unit-testable and resilient
 // to SDK refactors).
 //
-// Kept framework-free (no React, no SDK class import) and pure. Promoted
-// here (2026-08-28) from three near-byte-identical per-app copies
-// (`admin-app`, `app-vectros-ai`, `casework-spa`) — see this package's own
-// `ApiErrorAlert`/`RequestIdCaption`, the components that consume these.
+// Kept framework-free (no React, no SDK class import) and pure. Used by this
+// package's own `RequestIdCaption` (and so `ApiErrorAlert`).
 // ---------------------------------------------------------------------------
 
 /** The HTTP status code of a failed SDK call, if the error carries one. */
@@ -29,16 +27,16 @@ export function statusCodeOf(err: unknown): number | undefined {
  * {@link statusCodeOf} so it doesn't depend on importing the SDK's
  * `ConflictError` class.
  *
- * **On a record or document UPDATE this means an optimistic-concurrency
- * conflict** — the row changed since the `expectedVersion` you sent — and that
+ * **On a record or document UPDATE this means the item changed while your
+ * update was in flight** — whether or not you sent `expectedVersion` — and that
  * is the case this helper is for. Those paths raise no other 409 (immutable
  * identifiers are ignored on update), so a 409 there is unambiguous and
  * "someone else changed this; reload and try again" is the right thing to say.
  *
  * **It is a status-code test, not a cause test, and 409 is not reserved to
  * version conflicts across the rest of the API.** Other endpoints answer 409
- * for resource-state reasons: `DELETE /v1/schemas/{id}` while records of that
- * type still exist, `PUT /v1/schemas/{id}` when the update would turn off a
+ * for resource-state reasons: `DELETE /v1/schemas/{id}` while records, documents,
+ * users or entities of that type still exist, `PUT /v1/schemas/{id}` when the update would turn off a
  * capability other declarations still depend on, `POST /v1/admin/keys/scoped`
  * against a suspended principal. Those are permanent for the request as sent —
  * reloading and retrying, the remedy a version-conflict UI offers, fails

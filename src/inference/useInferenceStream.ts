@@ -20,7 +20,12 @@ import {
   reduceInferenceEvent,
   startedInferenceStreamState,
 } from './inferenceStream';
-import type { InferenceStreamEvent, InferenceStreamState } from './inferenceStream';
+import type {
+  InferenceStreamError,
+  InferenceStreamEvent,
+  InferenceStreamState,
+} from './inferenceStream';
+import { errorCodeOf, extractErrorMessage, statusCodeOf } from '../lib/apiError';
 
 /**
  * Makes the inference stream. Receives the run's abort signal to wire into the
@@ -73,11 +78,19 @@ export function useInferenceStream(): UseInferenceStream {
         } catch (err) {
           if (runIdRef.current !== myRunId) return; // cancelled — swallow
           const message = err instanceof Error ? err.message : 'Inference stream failed.';
-          setState((prev) =>
-            prev.status === 'done'
-              ? prev
-              : { ...prev, status: 'error', error: { message, code: 'stream_error' } },
-          );
+          const status = statusCodeOf(err);
+          const errorCode = errorCodeOf(err);
+          const detail = extractErrorMessage(err);
+          // Only set the structured fields the error actually carries, so an error
+          // without them keeps the `{ message, code }` shape.
+          const error: InferenceStreamError = {
+            message,
+            code: 'stream_error',
+            ...(status !== undefined && { status }),
+            ...(errorCode !== undefined && { errorCode }),
+            ...(detail !== undefined && { detail }),
+          };
+          setState((prev) => (prev.status === 'done' ? prev : { ...prev, status: 'error', error }));
         }
       })();
     },
