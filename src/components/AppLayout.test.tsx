@@ -11,6 +11,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import type { ReactNode } from 'react';
+import { createTheme, ThemeProvider } from '@mui/material';
+import type { Theme } from '@mui/material';
 
 import { AuthProvider, CurrentTenantProvider, useScopeGate } from '../auth';
 import type { AuthUser, TenantMembership } from '../auth';
@@ -97,32 +99,44 @@ const aliceUser: AuthUser = {
 function renderLayout(
   provider: FullMockProvider,
   initialPath = '/',
-  extraProps: { brandLogoSrc?: string; brandQualifier?: string; scopeGateTenant?: string } = {},
+  extraProps: {
+    brandLogoSrc?: string;
+    brandQualifier?: string;
+    scopeGateTenant?: string;
+    appBarStart?: ReactNode;
+    appBarDense?: boolean;
+    theme?: Theme;
+  } = {},
 ) {
+  const { theme, ...layoutProps } = extraProps;
+  const withTheme = (children: ReactNode): ReactNode =>
+    theme ? <ThemeProvider theme={theme}>{children}</ThemeProvider> : children;
   return render(
-    <TestIntlProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <AuthProvider provider={provider}>
-          <CurrentTenantProvider initialTenant="tnt_test" initialMemberships={SWITCHER_MEMBERSHIPS}>
-            <Routes>
-              <Route
-                element={
-                  <AppLayout
-                    brandName={BRAND_NAME}
-                    navItems={NAV_ITEMS}
-                    switcher={<div data-testid="switcher-slot">switcher</div>}
-                    {...extraProps}
-                  />
-                }
-              >
-                <Route index element={<div>welcome content</div>} />
-              </Route>
-              <Route path="/login" element={<div>login page</div>} />
-            </Routes>
-          </CurrentTenantProvider>
-        </AuthProvider>
-      </MemoryRouter>
-    </TestIntlProvider>,
+    withTheme(
+      <TestIntlProvider>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <AuthProvider provider={provider}>
+            <CurrentTenantProvider initialTenant="tnt_test" initialMemberships={SWITCHER_MEMBERSHIPS}>
+              <Routes>
+                <Route
+                  element={
+                    <AppLayout
+                      brandName={BRAND_NAME}
+                      navItems={NAV_ITEMS}
+                      switcher={<div data-testid="switcher-slot">switcher</div>}
+                      {...layoutProps}
+                    />
+                  }
+                >
+                  <Route index element={<div>welcome content</div>} />
+                </Route>
+                <Route path="/login" element={<div>login page</div>} />
+              </Routes>
+            </CurrentTenantProvider>
+          </AuthProvider>
+        </MemoryRouter>
+      </TestIntlProvider>,
+    ),
   );
 }
 
@@ -346,6 +360,163 @@ describe('AppLayout', () => {
         expect(screen.queryAllByText(BRAND_NAME).length).toBeGreaterThan(0);
       });
       expect(screen.queryByTestId('switcher-slot')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('top bar', () => {
+    // The MUI Toolbar is the single child of the AppBar's <header>. Its direct
+    // children are the bar's slots, in render order.
+    const getToolbar = (): HTMLElement => {
+      const toolbar = screen.getByRole('banner').firstElementChild;
+      if (!(toolbar instanceof HTMLElement)) throw new Error('top bar toolbar not found');
+      return toolbar;
+    };
+
+    const follows = (earlier: Element, later: Element): boolean =>
+      Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    describe('default (neither appBarStart nor appBarDense)', () => {
+      // The tests above that already pin the default bar: 'opens the user menu
+      // with correct ARIA wiring…' and 'hides the user menu trigger when no user
+      // is loaded' (account menu), and the 'switcher slot' pair (switcher shown
+      // when signed in, hidden when signed out).
+      // These add what those do not assert: the bar's height variant and its
+      // exact set of slots.
+      it('uses the regular toolbar with only the menu button, spacer, switcher and account menu', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider);
+        await screen.findByLabelText('Open user menu');
+
+        const toolbar = getToolbar();
+        expect(toolbar).toHaveClass('MuiToolbar-regular');
+        expect(toolbar).not.toHaveClass('MuiToolbar-dense');
+        expect(toolbar.children).toHaveLength(4);
+        expect(toolbar.children[0]).toBe(screen.getByLabelText('Open navigation'));
+        expect(toolbar.children[1]).toHaveStyle({ flexGrow: '1' });
+        expect(toolbar.children[2]).toContainElement(screen.getByTestId('switcher-slot'));
+        expect(toolbar.children[3]).toBe(screen.getByLabelText('Open user menu'));
+      });
+
+      it('leaves a host theme that makes toolbars dense by default in charge of the bar height', async () => {
+        const theme = createTheme({ components: { MuiToolbar: { defaultProps: { variant: 'dense' } } } });
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', { theme });
+        await screen.findByLabelText('Open user menu');
+        expect(getToolbar()).toHaveClass('MuiToolbar-dense');
+      });
+
+      it('keeps the sidebar brand header at 64px', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider);
+        await screen.findByLabelText('Open user menu');
+        for (const link of screen.getAllByRole('link', { name: BRAND_NAME })) {
+          expect(link).toHaveStyle({ minHeight: '64px', paddingTop: '16px', paddingBottom: '16px' });
+        }
+      });
+
+      it('keeps the vertical padding around the page content', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider);
+        await screen.findByText('welcome content');
+        const container = screen.getByRole('main').firstElementChild as HTMLElement;
+        expect(container).toHaveStyle({ paddingTop: '32px', paddingBottom: '32px' });
+      });
+    });
+
+    describe('appBarStart', () => {
+      it.each([['null', null], ['false', false]])('adds nothing to the bar when %s', async (_name, appBarStart) => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', { appBarStart });
+        await screen.findByLabelText('Open user menu');
+        expect(getToolbar().children).toHaveLength(4);
+      });
+
+      it('renders the node between the menu button and the flexible spacer', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', {
+          appBarStart: <span data-testid="start-slot">Acme Console</span>,
+        });
+        const start = await screen.findByTestId('start-slot');
+
+        const toolbar = getToolbar();
+        expect(toolbar.children).toHaveLength(5);
+        expect(toolbar.children[0]).toBe(screen.getByLabelText('Open navigation'));
+        expect(toolbar.children[1]).toContainElement(start);
+        // minWidth 0 is what lets a long truncating title shrink instead of
+        // pushing the account menu off the bar (jsdom has no layout to measure).
+        expect(toolbar.children[1]).toHaveStyle({ minWidth: '0px' });
+        // Trailing space keeps a truncated title from touching the controls
+        // to its right.
+        expect(toolbar.children[1]).toHaveStyle({ marginRight: '16px' });
+        // The spacer follows the start slot; it is what pushes the switcher and
+        // account menu to the right.
+        expect(toolbar.children[2]).toHaveStyle({ flexGrow: '1' });
+        expect(follows(start, screen.getByTestId('switcher-slot'))).toBe(true);
+        expect(follows(start, screen.getByLabelText('Open user menu'))).toBe(true);
+      });
+
+      it('renders for a signed-out user while the switcher and account menu stay hidden', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(null) });
+        renderLayout(provider, '/', {
+          appBarStart: <span data-testid="start-slot">Acme Console</span>,
+        });
+        expect(await screen.findByTestId('start-slot')).toBeInTheDocument();
+        expect(screen.queryByTestId('switcher-slot')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Open user menu')).not.toBeInTheDocument();
+      });
+    });
+
+    describe('appBarDense', () => {
+      it('switches the toolbar to the dense variant', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', { appBarDense: true });
+        await screen.findByLabelText('Open user menu');
+
+        const toolbar = getToolbar();
+        expect(toolbar).toHaveClass('MuiToolbar-dense');
+        expect(toolbar).not.toHaveClass('MuiToolbar-regular');
+        expect(toolbar).toHaveStyle({ minHeight: '48px' });
+      });
+
+      it('shortens the sidebar brand header to match, so the two stay aligned', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', { appBarDense: true });
+        await screen.findByLabelText('Open user menu');
+        const links = screen.getAllByRole('link', { name: BRAND_NAME });
+        expect(links.length).toBeGreaterThan(0);
+        for (const link of links) {
+          expect(link).toHaveStyle({ minHeight: '48px', paddingTop: '0px', paddingBottom: '0px' });
+        }
+      });
+
+      it('keeps the regular toolbar when explicitly false', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', { appBarDense: false });
+        await screen.findByLabelText('Open user menu');
+        expect(getToolbar()).toHaveClass('MuiToolbar-regular');
+      });
+
+      it('changes only the bar height: slots and content padding are unchanged', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', { appBarDense: true });
+        await screen.findByLabelText('Open user menu');
+
+        expect(getToolbar().children).toHaveLength(4);
+        expect(screen.getByTestId('switcher-slot')).toBeInTheDocument();
+        const container = screen.getByRole('main').firstElementChild as HTMLElement;
+        expect(container).toHaveStyle({ paddingTop: '32px', paddingBottom: '32px' });
+      });
+
+      it('combines with appBarStart', async () => {
+        const provider = mockAdapter({ getCurrentUser: vi.fn().mockResolvedValue(aliceUser) });
+        renderLayout(provider, '/', {
+          appBarDense: true,
+          appBarStart: <span data-testid="start-slot">Acme Console</span>,
+        });
+        await screen.findByTestId('start-slot');
+        expect(getToolbar()).toHaveClass('MuiToolbar-dense');
+        expect(getToolbar().children).toHaveLength(5);
+      });
     });
   });
 });

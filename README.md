@@ -33,7 +33,8 @@ so they look and behave the same without copy-paste:
   chrome, and `IntlProvider` scaffolding. No tenant or context switcher component ships: `AppLayout`
   renders whatever node you pass as its `switcher` prop in the app bar (when signed in), and
   `CurrentTenantProvider` with the `useCurrentTenant` hook hold the memberships and the active tenant
-  such a switcher reads and changes.
+  such a switcher reads and changes. The app bar also takes `appBarStart`, a node rendered on its left
+  (an app name, a breadcrumb or a page title), and `appBarDense`, which shortens the bar from 64px to 48px.
 - **API-error handling** — `ApiErrorAlert` (renders a Vectros API error consistently, including its
   request id) and `RequestIdCaption`, plus the `extractErrorMessage`/`extractRequestId`/
   `statusCodeOf`/`isVersionConflict`/`errorCodeOf` helpers they're built on — pull an error's

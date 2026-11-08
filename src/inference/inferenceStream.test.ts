@@ -22,7 +22,7 @@ const DONE = ev({
   outputTokens: 5,
   model: 'claude-haiku-4-5',
   platformCreditsCharged: 2,
-  inferenceBalanceCentsCharged: 0,
+  inferenceBalanceCentsChargedMilli: 0,
 });
 
 /** Fold a sequence of events from the initial state. */

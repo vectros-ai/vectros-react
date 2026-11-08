@@ -3,6 +3,17 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.17.0 — 2026-11-07
+
+### Added
+
+- **`AppLayout` takes `appBarStart`,** a node rendered on the left of the top bar after the mobile menu button, so you can show your app's
+  name, a breadcrumb or a page title there. It renders even while no user is signed in; `switcher` and the account menu still appear only
+  for a signed-in user. Give it a `noWrap` `Typography` to truncate a long text.
+- **`AppLayout` takes `appBarDense`,** which makes the top bar 48px (MUI's dense toolbar) instead of the default 64px (56px on a narrow
+  portrait screen), and the sidebar's brand header 48px with it. It defaults to `false`; if your theme makes every toolbar dense, also pass
+  `appBarDense` so the sidebar header matches.
+
 ## 0.16.0 — 2026-10-25
 
 ### Breaking changes

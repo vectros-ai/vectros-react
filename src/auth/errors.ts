@@ -8,8 +8,8 @@
 // know which provider is underneath — defeating the abstraction.
 //
 // The code set deliberately covers the GENERAL cases — invalid credentials,
-// pending confirmation, rate-limit, etc. — but is open to extension. Partner
-// forks adding new providers may extend the AuthErrorCode union (carefully,
+// pending confirmation, rate-limit, etc. — but is open to extension. Forks
+// adding new providers may extend the AuthErrorCode union (carefully,
 // since downstream consumers will only handle codes they know about).
 // ---------------------------------------------------------------------------
 

@@ -18,7 +18,7 @@ const DONE = ev({
   outputTokens: 1,
   model: 'm',
   platformCreditsCharged: 0,
-  inferenceBalanceCentsCharged: 0,
+  inferenceBalanceCentsChargedMilli: 0,
 });
 
 async function* fromArray(events: InferenceStreamEvent[]): AsyncGenerator<InferenceStreamEvent> {

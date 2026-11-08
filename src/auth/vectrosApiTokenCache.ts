@@ -26,7 +26,7 @@
 // expiry. Cheap — with the minter's ~15-min TTL that's ~one mint per 14 minutes
 // per (tenant, context) per browser session.
 //
-// Concurrent-mint coalescing (from the dev-portal hardening): multiple
+// Concurrent-mint coalescing: multiple
 // concurrent callers for the SAME (tenant, context) during the refresh window
 // share a single in-flight Promise instead of each starting their own mint. The
 // in-flight slot is cleared in a finally block so a failed mint can be retried.

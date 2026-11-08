@@ -35,7 +35,7 @@ const DONE_FRAME = frame('done', {
   outputTokens: 2,
   model: 'm',
   platformCreditsCharged: 0,
-  inferenceBalanceCentsCharged: 0,
+  inferenceBalanceCentsChargedMilli: 0,
 });
 
 const EVENT_FRAMES: string[] = [CONTEXT_FRAME, HEL_FRAME, LO_FRAME, DONE_FRAME];

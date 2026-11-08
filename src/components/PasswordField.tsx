@@ -10,7 +10,7 @@
 // time as bugs are fixed in only one site. One component encapsulates the
 // invariants once.
 //
-// **Reference-app discipline.** Partner forks see this as the "good
+// **Reference-app discipline.** Forks of the reference apps see this as the "good
 // default" for password UX in 2026 — visibility toggle is a modern user
 // expectation, CapsLock indication prevents a real category of "why doesn't
 // my password work?" support tickets, and strength meters on new-password

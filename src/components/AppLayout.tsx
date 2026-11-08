@@ -9,8 +9,11 @@
 //     - App-provided nav items, each with an optional leading icon; every gated
 //       item is wrapped in <ScopeGate> so a principal without the action never
 //       sees the nav surface.
-//   - Light top AppBar in the content column: mobile menu button, an
-//     app-provided switcher slot, and the user-account menu.
+//   - Light top AppBar in the content column: mobile menu button, an optional
+//     app-provided start slot (app name, breadcrumb or page title), an
+//     app-provided switcher slot, and the user-account menu. The bar is 64px
+//     tall by default (56px below the `sm` breakpoint in portrait);
+//     `appBarDense` makes it 48px.
 //   - Main content area (Outlet renders the nested route's component).
 //
 // The shell is brand- and app-agnostic:
@@ -21,6 +24,8 @@
 //                       i18n message ids; each item may carry a leading icon.
 //   - `switcher`      — an app-provided node rendered in the AppBar when signed in
 //                       (admin's TenantSwitcher; app.vectros.ai's ContextSwitcher).
+//   - `appBarStart`   — an app-provided node on the left of the AppBar.
+//   - `appBarDense`   — a shorter AppBar.
 //
 // The sidebar is a fixed near-black surface with light-on-dark foreground —
 // the canonical backdrop for a light brand mark. Surface/divider colors
@@ -153,6 +158,9 @@ interface SidebarHeaderProps {
   readonly brandName: string;
   readonly brandLogoSrc?: string;
   readonly brandQualifier?: string;
+  /** Match the shorter top bar: the header is 48px instead of 64px, so the rail's
+   *  divider lines up with the bar's bottom border. */
+  readonly dense?: boolean;
 }
 
 /** Brand header at the top of the sidebar — logo image if provided, else the
@@ -169,6 +177,7 @@ function SidebarHeader({
   brandName,
   brandLogoSrc,
   brandQualifier,
+  dense = false,
 }: SidebarHeaderProps): React.JSX.Element {
   return (
     <Box
@@ -177,9 +186,9 @@ function SidebarHeader({
       sx={{
         display: 'flex',
         alignItems: 'center',
-        minHeight: 64,
+        minHeight: dense ? 48 : 64,
         px: 2.5,
-        py: 2,
+        py: dense ? 0 : 2,
         textDecoration: 'none',
         color: 'inherit',
       }}
@@ -235,6 +244,36 @@ export interface AppLayoutProps {
   /** Optional AppBar node rendered when signed in (a tenant/context switcher). */
   readonly switcher?: ReactNode;
   /**
+   * Optional node rendered on the left of the top bar, after the mobile menu
+   * button and before the flexible gap that pushes the switcher and account menu
+   * to the right. Use it for an app name, a breadcrumb or a page title (for
+   * example `<Typography>Acme Console</Typography>`).
+   *
+   * Unlike `switcher`, it is not tied to the signed-in user, so it renders
+   * whenever you pass it; the switcher and the account menu still appear only
+   * for a signed-in user. The slot can shrink to nothing, so a long text does
+   * not push the account menu off the bar: give it a `noWrap` Typography to
+   * truncate it with an ellipsis (a plain text node does not truncate). Pass
+   * non-heading text if each page already renders its own `<h1>`, so the page
+   * keeps a single main heading.
+   *
+   * Omit it to render no start slot.
+   */
+  readonly appBarStart?: ReactNode;
+  /**
+   * Make the top bar shorter: 48px (MUI's dense toolbar) instead of the default
+   * 64px (56px below the `sm` breakpoint in portrait). The sidebar's brand header
+   * shrinks to 48px with it, so the two stay aligned. The height is a minimum: any
+   * bar content taller than 48px (a tall switcher, a start slot whose text wraps,
+   * breadcrumbs) makes the bar grow and the two no longer line up. The padding
+   * around the page content below the bar is unchanged. Defaults to `false`.
+   *
+   * If your theme already makes every toolbar dense (`MuiToolbar` default
+   * `variant: 'dense'`), the bar is 48px whatever you pass here; pass `true` so
+   * the sidebar header matches.
+   */
+  readonly appBarDense?: boolean;
+  /**
    * Forwarded to every gated nav item's `<ScopeGate tenantOverride={...}>`.
    * Omit in a multi-tenant host — each `ScopeGate` reads the active tenant
    * from `useCurrentTenant()` (the TenantSwitcher-controlled tenant), the
@@ -256,6 +295,8 @@ export function AppLayout({
   brandQualifier,
   navItems,
   switcher,
+  appBarStart,
+  appBarDense = false,
   scopeGateTenant,
 }: AppLayoutProps): React.JSX.Element {
   const { user, signOut } = useAuth();
@@ -324,6 +365,7 @@ export function AppLayout({
         brandName={brandName}
         {...(brandLogoSrc ? { brandLogoSrc } : {})}
         {...(brandQualifier ? { brandQualifier } : {})}
+        {...(appBarDense ? { dense: true } : {})}
       />
       <Divider sx={{ borderColor: RAIL_DIVIDER }} />
       <NavList
@@ -414,7 +456,7 @@ export function AppLayout({
             borderColor: 'divider',
           }}
         >
-          <Toolbar>
+          <Toolbar {...(appBarDense ? { variant: 'dense' as const } : {})}>
             {/* Mobile-only menu button. Hidden on desktop where the rail is permanent. */}
             <IconButton
               color="inherit"
@@ -425,6 +467,16 @@ export function AppLayout({
             >
               <MenuIcon />
             </IconButton>
+
+            {/* App-provided start slot (app name, breadcrumb, page title). Not gated
+                on the user. minWidth 0 lets a long title truncate instead of
+                pushing the account menu off the bar; mr keeps a truncated title
+                from touching the controls to its right. */}
+            {appBarStart != null && appBarStart !== false && (
+              <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0, mr: 2 }}>
+                {appBarStart}
+              </Box>
+            )}
 
             <Box sx={{ flexGrow: 1 }} />
 
