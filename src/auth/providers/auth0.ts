@@ -38,7 +38,7 @@ import type { IdToken } from '@auth0/auth0-spa-js';
 import { AuthError } from '../errors';
 import type { AuthProviderAdapter, AuthUser, HostedRedirectAuth } from '../types';
 import type { PartnerApiResolvedScope } from '../vectrosApiTokenCache';
-import { parseResolvedScope } from '../vectrosApiTokenCache';
+import { exchangeSubjectToken } from './tokenExchange';
 
 /**
  * Deployment-specific configuration the Auth0 provider needs, injected by the
@@ -75,24 +75,6 @@ export interface Auth0AuthProviderConfig {
     readonly audience?: string;
     readonly scope?: string;
   };
-}
-
-/** Wire shape of `POST /v1/auth/token/exchange`'s success response (RFC 8693 §2.2.1). */
-interface ExchangeSuccessResponse {
-  readonly access_token: string;
-  readonly expires_in: number;
-  /**
-   * camelCase — a Vectros-specific extension to the RFC 8693 envelope, not
-   * part of the RFC, so not snake_case like the fields above: the token's
-   * resolved `allowedActions`/`identity`, parsed via {@link parseResolvedScope}.
-   */
-  readonly resolvedScope?: unknown;
-}
-
-/** Wire shape of the exchange endpoint's OAuth-standard error envelope (RFC 6749 §5.2). */
-interface ExchangeErrorResponse {
-  readonly error?: string;
-  readonly error_description?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,18 +144,6 @@ async function tryAuth0<T>(fn: () => Promise<T>): Promise<T> {
   } catch (e) {
     throw mapAuth0Error(e);
   }
-}
-
-/**
- * How long to wait before the one-shot self-signup-race retry in
- * {@link Auth0AuthProvider.exchangeToken} below. Short enough not to be a
- * noticeable UI stall; long enough to clear a same-second concurrent write
- * on the other side of the race.
- */
-const EXCHANGE_RACE_RETRY_DELAY_MS = 400;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -399,51 +369,7 @@ export class Auth0AuthProvider implements AuthProviderAdapter, HostedRedirectAut
       throw new AuthError('INVALID_CREDENTIALS', 'Not authenticated — cannot exchange a token.');
     }
 
-    const attempt = async (): Promise<Response> => {
-      try {
-        return await fetch(this.config.exchangeEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
-            subject_token: accessToken,
-            subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
-            ...(options?.inviteToken ? { invite_token: options.inviteToken } : {}),
-            ...(options?.signupType ? { signup_type: options.signupType } : {}),
-            ...(options?.contextId ? { context_id: options.contextId } : {}),
-          }),
-        });
-      } catch (e) {
-        throw new AuthError(
-          'NETWORK_ERROR',
-          e instanceof Error ? e.message : 'Token exchange request failed.',
-        );
-      }
-    };
-
-    let resp = await attempt();
-    if (resp.status === 403 && !options?.inviteToken && !options?.skipOwnRetry) {
-      await delay(EXCHANGE_RACE_RETRY_DELAY_MS);
-      resp = await attempt();
-    }
-
-    if (!resp.ok) {
-      const body = (await resp.json().catch(() => null)) as ExchangeErrorResponse | null;
-      // The server deliberately keeps 401/403/404 bodies generic (uniform
-      // not-found) — surface the status + OAuth `error` code as diagnostics,
-      // never invent a more specific client-side distinction than the server
-      // itself makes.
-      throw new AuthError(
-        'UNKNOWN',
-        `Token exchange failed: ${resp.status} ${body?.error ?? ''} ${body?.error_description ?? ''}`.trim(),
-      );
-    }
-    const data = (await resp.json()) as ExchangeSuccessResponse;
-    return {
-      token: data.access_token,
-      expiresAtMs: Date.now() + data.expires_in * 1000,
-      resolvedScope: parseResolvedScope(data.resolvedScope),
-    };
+    return exchangeSubjectToken(this.config.exchangeEndpoint, accessToken, options);
   }
 
   /**

@@ -10,7 +10,7 @@
 //   2. Update the `new CognitoAuthProvider()` line in src/main.tsx.
 //   3. (Optional) Delete this file.
 //
-// Mapping notes for partners porting this pattern:
+// Mapping notes for porting this pattern:
 //   - Cognito requires the `custom:<key>` prefix for app-defined attributes.
 //     The metadata-bag → custom-attribute translation is the most common
 //     point of divergence across providers; isolate it here.
@@ -22,7 +22,7 @@
 //     Amplify version is a real-world security risk.
 //   - amplifySignOut({ global: true }) invalidates refresh tokens across
 //     ALL of the user's sessions. We default to global sign-out to defend
-//     against stolen-refresh-token replay; partner forks with shared-device
+//     against stolen-refresh-token replay; forks with shared-device
 //     flows may want to switch this to local-only.
 // ---------------------------------------------------------------------------
 
@@ -534,7 +534,7 @@ export class CognitoAuthProvider
    * bridge (it mints via the developer API's scoped-token endpoint, whose
    * `tenant=live|test` param is derived from the tenant's membership kind).
    * The host app wires it into the token cache via setPartnerApiTokenMinter; a
-   * partner fork swaps the provider + wires its own minter. Keeping the
+   * fork swaps the provider + wires its own minter. Keeping the
    * /developer/* call HERE (not in the shared cache) keeps the reference apps
    * forkable.
    *
@@ -622,7 +622,7 @@ export class CognitoAuthProvider
       );
       if (!resp.ok) {
         // No session / not an owner / nothing configured → empty, never throw.
-        // That answer is only honest on the FIRST page, where it means "there is
+        // That answer is only correct on the FIRST page, where it means "there is
         // nothing here for you". Mid-drain the same status means the listing was
         // interrupted, and returning the pages already read would be the silent
         // truncation this loop is built to avoid — so it throws instead.

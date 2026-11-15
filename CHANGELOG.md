@@ -3,6 +3,49 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.18.0 — 2026-11-14
+
+### Breaking changes
+
+- **The web UI peers are optional, so npm no longer installs them for you.** `react-dom`, `@mui/material`,
+  `@mui/icons-material`, `@emotion/react`, `@emotion/styled` and `react-router` are optional peer dependencies; the
+  root entry still needs all six. **Migration:** a web app that does not list them in its own `dependencies` adds
+  them (`npm install react-dom @mui/material @mui/icons-material @emotion/react @emotion/styled react-router`).
+
+### Added
+
+- **`@vectros-ai/react/core`, a headless entry for React Native and server rendering:** everything that does not
+  render MUI (auth, scope and tenant gates, the token cache, `useInferenceStream`, the schema form and column logic,
+  the API error helpers, `IntlProvider`, `baseMessagesEn`). It needs only `react`, `react-intl`,
+  `@tanstack/react-query` and `@vectros-ai/sdk`. The root entry re-exports all of it.
+- **`@vectros-ai/react/providers/expo`: `ExpoAuthProvider`,** sign-in for an Expo app through any identity provider
+  that offers the OpenID Connect authorization-code flow with PKCE to a public client. It keeps the provider's
+  refresh token in `expo-secure-store` and exchanges the provider's token for a Vectros `st_*`; wire
+  `mintPartnerApiToken` into the token cache with `setPartnerApiTokenMinter`. The Expo modules are passed to the
+  constructor, so the package depends on neither Expo nor React Native. The constructor refuses an exchange endpoint that is
+  not https (http only to localhost), and `signOut()` throws an `AuthError` if the secure store refuses the delete. Sign-in and
+  sign-out clear the cached Vectros bearers; `getAccessToken()` returns the provider's access token.
+- **`exchangeSubjectToken(endpoint, token, options?)`,** one call to the Vectros token exchange, for a minter of
+  your own (for example, an app that signs in with the Firebase SDK). It is the root entry's only new runtime export. A success
+  response without a token or a positive `expires_in` is an `AuthError`, and a request is abandoned as `NETWORK_ERROR` after
+  30 seconds.
+- **A rate-limited token exchange throws `AuthError('LIMIT_EXCEEDED')`** (also from the Auth0 provider's minter) instead of `UNKNOWN`, with the server's
+  `Retry-After` in the error's new `retryAfterSeconds`. The token cache does not retry it, and refuses further calls
+  for the same tenant and context locally until that time has passed (at most an hour); signing out or switching
+  tenant clears the wait.
+- **`typesVersions`,** so TypeScript resolves `/core` and `providers/*` under `moduleResolution` `node10` too.
+
+### Fixed
+
+- **`filterableFieldIds` leaves out `geo`, `asset` and `assets` fields,** which a text filter cannot match.
+- **`IntlProvider` renders in React Native,** where `navigator` has no `language`: it falls back to `defaultLocale`.
+  Pass the device locale as the `locale` prop.
+
+### Changed
+
+- **`useScopeGate().can('runs:c:<agent>')` is also true for a caller holding a bare `runs:c`,** as the API answers.
+  A grant naming one agent still never satisfies a bare `runs:c` ask, and every other resource is unchanged.
+
 ## 0.17.0 — 2026-11-07
 
 ### Added

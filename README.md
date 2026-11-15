@@ -10,9 +10,10 @@ so they look and behave the same without copy-paste:
 - **Provider-agnostic auth** — a minimal `AuthProviderAdapter` core plus purpose-named extension
   interfaces a provider implements only where they genuinely apply: `EmbeddedCredentialAuth`
   (sign-in/up, password reset, TOTP MFA — driven by the app itself) for a provider like Cognito, or
-  `HostedRedirectAuth` for a provider whose own hosted page owns the whole ceremony. Ships two
-  reference implementations: `CognitoAuthProvider` (embedded) and `Auth0AuthProvider` (Auth0
-  Universal Login, hosted-redirect). Write your own by implementing the interfaces that fit your
+  `HostedRedirectAuth` for a provider whose own hosted page owns the whole ceremony. Ships three
+  reference implementations: `CognitoAuthProvider` (embedded), `Auth0AuthProvider` (Auth0
+  Universal Login, hosted-redirect) and `ExpoAuthProvider` (any OpenID Connect provider from a
+  React Native / Expo app, hosted-redirect). Write your own by implementing the interfaces that fit your
   provider's actual integration mode — see each interface's doc comment for which is which.
 - **Vectros API token cache** — short-lived `st_*` bearers minted on demand and
   cached per `(tenant, context)`, with concurrent-mint coalescing and a
@@ -89,13 +90,15 @@ so they look and behave the same without copy-paste:
 
 ```bash
 npm install @vectros-ai/react
+# A web app also installs the web UI peers (optional peers, so npm does not add them for you):
+npm install react-dom @mui/material @mui/icons-material @emotion/react @emotion/styled react-router
 ```
 
 This is a toolkit for an existing app, so it expects a set of peer
 dependencies the app already provides (React, MUI, TanStack Query, the
 Vectros SDK, and more) — see [Peer dependencies](#peer-dependencies) below.
 
-**`CognitoAuthProvider` and `Auth0AuthProvider` are each their own subpath
+**`CognitoAuthProvider`, `Auth0AuthProvider` and `ExpoAuthProvider` are each their own subpath
 import, not part of the main barrel** — only their *types* are exported from
 `@vectros-ai/react` itself, so each SDK's runtime only enters your bundle
 when you actually import that provider:
@@ -106,16 +109,52 @@ import { CognitoAuthProvider } from '@vectros-ai/react/providers/cognito';
 // or: import { Auth0AuthProvider } from '@vectros-ai/react/providers/auth0';
 ```
 
+### React Native (Expo)
+
+Import the headless entry, `@vectros-ai/react/core`, and the Expo provider. `/core` holds everything that does
+not render MUI: auth state and hooks, tenant and scope gates, the token cache, the streaming inference hook, the
+schema form logic, the API error helpers and `IntlProvider`. It needs only `react`, `react-intl`,
+`@tanstack/react-query` and `@vectros-ai/sdk`. The root entry needs the web UI kit, so a React Native app must
+not import it. Package `exports` resolution is required: Expo SDK 53 or later (React Native 0.79 or later).
+
+```ts
+import * as AuthSession from 'expo-auth-session';
+import * as SecureStore from 'expo-secure-store';
+import { AuthProvider, getVectrosApiToken, setPartnerApiTokenMinter } from '@vectros-ai/react/core';
+import { ExpoAuthProvider } from '@vectros-ai/react/providers/expo';
+
+const auth = new ExpoAuthProvider({
+  issuer: 'https://idp.example.com',
+  clientId: 'your-public-client-id',
+  redirectUri: AuthSession.makeRedirectUri({ scheme: 'org.example.app' }),
+  subjectToken: 'id_token',
+  exchangeEndpoint: 'https://api.vectros.ai/v1/auth/token/exchange',
+  authSession: AuthSession,
+  secureStore: SecureStore,
+});
+setPartnerApiTokenMinter((tenantId, contextId) => auth.mintPartnerApiToken(tenantId, contextId));
+```
+
+`ExpoAuthProvider` signs in through the system browser with PKCE, keeps the identity provider's refresh token in
+`expo-secure-store` and every other token in memory, and exchanges the provider's token for a Vectros `st_*`. The
+Expo modules are passed in, so this package depends on neither Expo nor React Native: `expo-auth-session` and
+`expo-secure-store` are the app's own dependencies. The identity provider must offer the authorization-code flow
+with PKCE to a public client; for one that does not (Firebase Authentication), sign in with its SDK and mint with
+`exchangeSubjectToken` from `/core`. The full guide, including which token each identity provider needs and the
+app-store checklist, is [Mobile apps](https://docs.vectros.ai/guides/clients/mobile).
+
 ## Status
 
 Pre-1.0. The API may change between minor versions until the first stable release.
 
 ## Peer dependencies
 
-The consuming app supplies React and React DOM 19 or later, MUI (`@mui/material` and
-`@mui/icons-material`) 7 or later, Emotion 11.14 or later, TanStack Query 5 or later, react-intl 10 or
-later, react-router 7 or later, and `@vectros-ai/sdk` 0.9.0 or later (all required
-`peerDependencies`; the ranges have no upper bound). `aws-amplify`
+The consuming app supplies React 19 or later, TanStack Query 5 or later, react-intl 10 or later and
+`@vectros-ai/sdk` 0.9.0 or later (required `peerDependencies`; the ranges have no upper bound). The web
+UI kit is an **optional** set of peers that the root entry needs and `/core` does not: React DOM 19 or
+later, MUI (`@mui/material` and `@mui/icons-material`) 7 or later, Emotion (`@emotion/react` and
+`@emotion/styled`) 11.14 or later and react-router 7 or later. Because they are optional, npm does not
+install them for you: a web app installs them itself. `aws-amplify`
 and `@auth0/auth0-spa-js` are **optional** peer dependencies — install whichever
 matches the provider you actually use (`CognitoAuthProvider` needs `aws-amplify`;
 `Auth0AuthProvider` needs `@auth0/auth0-spa-js`); neither is required if you write

@@ -62,6 +62,7 @@
 // broader read/write reach.
 // ---------------------------------------------------------------------------
 
+import { AuthError } from './errors';
 import type { TenantId } from './types';
 
 /**
@@ -213,6 +214,15 @@ const cachedExpiriesMs = new Map<string, number>();
  */
 const cachedResolvedScopes = new Map<string, PartnerApiResolvedScope>();
 const inFlightMints = new Map<string, Promise<string>>();
+/**
+ * Per slot: until when (epoch ms) the server's rate limit holds. After a mint is refused with `LIMIT_EXCEEDED` carrying
+ * `retryAfterSeconds`, every call for that slot is refused LOCALLY until then, so callers that retry do not each send another request
+ * (each one would count against the same limit). Capped at {@link MAX_LIMIT_COOLDOWN_MS}; cleared by a successful mint and by
+ * {@link clearVectrosApiTokenCache}.
+ */
+const limitedUntilMs = new Map<string, number>();
+/** The longest a server's `Retry-After` is honoured locally (the token exchange's longest window is an hour). */
+const MAX_LIMIT_COOLDOWN_MS = 60 * 60 * 1000;
 let cacheGeneration = 0;
 let minter: PartnerApiTokenMinter | null = null;
 let assumer: PartnerApiTokenAssumer | null = null;
@@ -299,6 +309,18 @@ export function getVectrosApiToken(
     return inFlight;
   }
 
+  // The server said when to come back: refuse locally until then rather than send a request it will refuse too.
+  const limitedUntil = limitedUntilMs.get(key);
+  if (limitedUntil !== undefined) {
+    if (limitedUntil > now) {
+      const seconds = Math.ceil((limitedUntil - now) / 1000);
+      return Promise.reject(
+        new AuthError('LIMIT_EXCEEDED', `Token exchange is rate limited; retry after ${seconds} s.`, seconds),
+      );
+    }
+    limitedUntilMs.delete(key);
+  }
+
   // Capture the generation BEFORE the mint starts; if a clear bumps it while
   // the mint is in flight, the result is discarded (see module comment).
   const generationAtStart = cacheGeneration;
@@ -374,7 +396,18 @@ export function getVectrosApiToken(
         // boot has caught up (see the "does NOT permanently poison the
         // slot" test). Retrying here would just cost time for no benefit.
         const stillUnconfigured = identityOverride ? !assumer : !minter;
-        if (stillUnconfigured || cacheGeneration !== generationAtStart) {
+        // Nor a rate-limit refusal: the server has said how long to wait, and
+        // a retry 1.5 s later would only be refused again.
+        const rateLimited = firstErr instanceof AuthError && firstErr.code === 'LIMIT_EXCEEDED';
+        if (
+          rateLimited &&
+          cacheGeneration === generationAtStart &&
+          typeof firstErr.retryAfterSeconds === 'number' &&
+          firstErr.retryAfterSeconds > 0
+        ) {
+          limitedUntilMs.set(key, Date.now() + Math.min(firstErr.retryAfterSeconds * 1000, MAX_LIMIT_COOLDOWN_MS));
+        }
+        if (stillUnconfigured || rateLimited || cacheGeneration !== generationAtStart) {
           throw firstErr;
         }
         await delay(SHARED_MINT_RETRY_DELAY_MS);
@@ -394,6 +427,7 @@ export function getVectrosApiToken(
 
       cachedTokens.set(key, token);
       cachedExpiriesMs.set(key, expiresAtMs);
+      limitedUntilMs.delete(key);
       // A minter that hasn't wired resolvedScope yet (see PartnerApiTokenMinter's
       // own doc) leaves this slot unset — getVectrosResolvedScope degrades that
       // to an empty scope, never a stale/mismatched one. That degraded state is
@@ -472,6 +506,7 @@ export function clearVectrosApiTokenCache(): void {
   cachedExpiriesMs.clear();
   cachedResolvedScopes.clear();
   inFlightMints.clear();
+  limitedUntilMs.clear();
 }
 
 /**

@@ -50,14 +50,19 @@ export interface IntlProviderProps {
 /**
  * Detect the active locale: the leading subtag of `navigator.language`
  * (`en-US` → `en`) if the app ships a catalog for it, else `defaultLocale`.
- * SSR-safe: `navigator` is undefined in Node → returns `defaultLocale`.
+ * Returns `defaultLocale` wherever `navigator.language` is not a string: on a
+ * server, where `navigator` is undefined, and in React Native, where
+ * `navigator` exists but carries no `language`. A React Native app that wants
+ * the device locale passes it as the `locale` prop (for example from
+ * `expo-localization`).
  */
 function detectLocale(messagesByLocale: MessagesByLocale, defaultLocale: string): string {
-  if (typeof navigator === 'undefined') {
+  const language: unknown = typeof navigator === 'undefined' ? undefined : navigator.language;
+  if (typeof language !== 'string' || language === '') {
     return defaultLocale;
   }
-  const language = navigator.language.split('-')[0] ?? defaultLocale;
-  return language in messagesByLocale ? language : defaultLocale;
+  const subtag = language.split('-')[0] ?? defaultLocale;
+  return subtag in messagesByLocale ? subtag : defaultLocale;
 }
 
 /**

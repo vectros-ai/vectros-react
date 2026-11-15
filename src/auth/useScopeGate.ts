@@ -118,6 +118,15 @@ export interface ScopeGateValue {
  */
 export const OPS_LETTERS = 'crudsx';
 
+/**
+ * Resources whose qualifier names ONE instance by its exact name, and where an unqualified grant
+ * covers every instance: `runs:c:<agent>` starts that one agent, a bare `runs:c` starts any. For
+ * these alone, {@link canPerform} lets an unqualified grant answer a per-instance ask, because the
+ * API does exactly that. So a per-agent ask (`runs:c:incident-intake`) answers as the API would
+ * for a caller holding either shape.
+ */
+export const BARE_GRANT_COVERS_EVERY_NAMED_INSTANCE: ReadonlySet<string> = new Set(['runs']);
+
 /** True when every character of `s` is a recognized op letter, and `s` is non-empty. */
 export function isOpsString(s: string): boolean {
   return s.length > 0 && [...s].every((c) => OPS_LETTERS.includes(c));
@@ -175,6 +184,14 @@ export function isOpsString(s: string): boolean {
  *   an entry whose qualifier is meaningless never reaches a resolved scope in the first
  *   place.
  *
+ *   One deliberate exception, for the resources in
+ *   {@link BARE_GRANT_COVERS_EVERY_NAMED_INSTANCE} (`runs`): there an unqualified grant DOES
+ *   satisfy a per-instance ask, because the API's rule is exactly that a bare `runs:c` starts
+ *   every agent. Gate an agent's run button on `runs:c:<agent-name>`: it answers `true` to a
+ *   caller holding `runs:c` or `runs:c:<agent-name>`, and `false` to one holding only another
+ *   agent's grant, which is what the API answers too. The reverse direction is unchanged: a
+ *   grant naming one agent never satisfies a bare `runs:c` ask.
+ *
  *   One shape this predicate does not reach at all: a qualifier that itself contains a
  *   colon. The ask is split unbounded, so such an action yields more than three segments
  *   and drops straight to exact matching, whatever the platform would make of it.
@@ -195,12 +212,14 @@ export function canPerform(
     const [resource, askedOps, askedQualifier] = askedSegs;
     if (resource && isOpsString(askedOps ?? '')) {
       let grantedOps = '';
+      const bareCoversAsk = askedSegs.length === 3 && BARE_GRANT_COVERS_EVERY_NAMED_INSTANCE.has(resource);
       for (const raw of allowedActions) {
         const segs = raw.split(':');
-        if (segs.length !== askedSegs.length) continue; // shape mismatch — not unioned in
+        const bareForNamedAsk = bareCoversAsk && segs.length === 2;
+        if (segs.length !== askedSegs.length && !bareForNamedAsk) continue; // shape mismatch — not unioned in
         const [grantedResource, grantedOpsStr, grantedQualifier] = segs;
         if (grantedResource !== resource) continue;
-        if (askedSegs.length === 3 && grantedQualifier !== askedQualifier) continue;
+        if (askedSegs.length === 3 && !bareForNamedAsk && grantedQualifier !== askedQualifier) continue;
         if (!isOpsString(grantedOpsStr ?? '')) continue;
         for (const c of grantedOpsStr ?? '') {
           if (!grantedOps.includes(c)) grantedOps += c;

@@ -8,6 +8,7 @@
 //   import type { AuthUser, SignInResult } from '../auth';
 //   import { CognitoAuthProvider } from '@vectros-ai/react/providers/cognito';
 //   import { Auth0AuthProvider } from '@vectros-ai/react/providers/auth0';
+//   import { ExpoAuthProvider } from '@vectros-ai/react/providers/expo';
 //
 // Do NOT value-export a concrete provider from this barrel (see the
 // CognitoAuthProvider/Auth0AuthProvider section below) — that would pull
@@ -44,9 +45,11 @@ export type { CurrentTenantProviderProps } from './CurrentTenantProvider';
 // bundle). Import the concrete class from its own subpath instead:
 //   import { CognitoAuthProvider } from '@vectros-ai/react/providers/cognito';
 //   import { Auth0AuthProvider } from '@vectros-ai/react/providers/auth0';
+//   import { ExpoAuthProvider } from '@vectros-ai/react/providers/expo';
 // See tsup.config.ts's file header for why this split exists.
 export type { CognitoAuthProvider, CognitoAuthProviderConfig } from './providers/cognito';
 export type { Auth0AuthProvider, Auth0AuthProviderConfig } from './providers/auth0';
+export type { ExpoAuthProvider, ExpoAuthProviderConfig } from './providers/expo';
 
 export {
   getVectrosApiToken,

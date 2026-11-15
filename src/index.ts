@@ -10,9 +10,9 @@
 // each module lands during the admin-app extraction.
 // ---------------------------------------------------------------------------
 
-import baseMessages from './i18n/messages.en.json';
-
-export * from './auth';
+// The headless half (auth, token cache, inference, schema logic, i18n). It is
+// also published alone as `@vectros-ai/react/core` for apps without MUI.
+export * from './core';
 
 // UI primitives (presentational; brand/copy injected by the host app).
 export { AuthCard } from './components/AuthCard';
@@ -52,37 +52,8 @@ export type { SearchModeToggleProps, SearchMode } from './components/search/Sear
 export { SearchResultCard } from './components/search/SearchResultCard';
 export type { SearchResultCardProps } from './components/search/SearchResultCard';
 
-// API-error extraction helpers (pure, framework-free) — pair with
-// ApiErrorAlert/RequestIdCaption above, or use standalone for a host's own
-// error handling (e.g. `isVersionConflict` to special-case a 409, or
-// `errorCodeOf` when the status alone does not say which 409 you got).
-export {
-  errorCodeOf,
-  extractErrorMessage,
-  extractRequestId,
-  isVersionConflict,
-  statusCodeOf,
-} from './lib/apiError';
-
-// Schema-driven record UI — typed form inputs + derived list columns from a
-// schema's `FieldDef[]`/`renderHints` (see schema-ui/index.ts for the full
-// surface). `RecordFormFields` renders react-intl messages under the
-// `recordForm.*` ids shipped in this package's base catalog (`baseMessagesEn`
-// below) — a host merging its own catalog over the base gets them for free.
-export * from './schema-ui';
-
-// Streaming SSE state for chat/RAG/document-ask inference surfaces (see
-// inference/index.ts). Endpoint-agnostic — a host supplies the SDK call as a
-// runner thunk (`useInferenceStream`'s own doc comment shows the RAG shape).
-export * from './inference';
-
-// i18n — catalog-agnostic react-intl wrapper (the app supplies its catalog).
-export { IntlProvider, I18N_DEFAULT_LOCALE } from './i18n/IntlProvider';
-export type { IntlProviderProps, MessagesByLocale } from './i18n/IntlProvider';
-
-// The package's default English strings for its OWN components (the AppLayout
-// chrome, PasswordField, and the MFA surface). Consuming apps merge their own
-// catalog OVER this so they never hand-copy these keys (which drifts):
-//   const MESSAGES = { en: { ...baseMessagesEn, ...appMessagesEn } };
-// App-defined keys win on collision. Add a locale by exporting its companion.
-export const baseMessagesEn: Readonly<Record<string, string>> = baseMessages;
+// Schema-driven record form fields (MUI). The schema logic it renders from is
+// part of the headless entry above. `RecordFormFields` renders react-intl
+// messages under the `recordForm.*` ids shipped in `baseMessagesEn`.
+export { RecordFormFields } from './schema-ui/RecordFormFields';
+export type { RecordFormFieldsProps } from './schema-ui/RecordFormFields';

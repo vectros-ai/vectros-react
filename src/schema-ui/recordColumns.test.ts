@@ -127,6 +127,19 @@ describe('filterableFieldIds', () => {
     ];
     expect(filterableFieldIds(fields)).toEqual(['a', 'c']);
   });
+
+  it('leaves out geo and asset fields even when flagged filterable (a geo field is filterable by default)', () => {
+    const fields = [
+      field('name', 'string', { filterable: true }),
+      field('where', 'geo', { filterable: true }),
+      field('cover', 'asset', { filterable: true }),
+      field('gallery', 'assets', { filterable: true }),
+      field('tags', 'array', { filterable: true }),
+    ];
+    expect(filterableFieldIds(fields)).toEqual(['name', 'tags']);
+    // and so a location value is never matched as text
+    expect(payloadMatchesQuery({ name: 'Cafe', where: { lat: 51.5, lon: -0.12 } }, 'lat', filterableFieldIds(fields))).toBe(false);
+  });
 });
 
 describe('formatCellValue', () => {

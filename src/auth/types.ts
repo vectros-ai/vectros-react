@@ -68,10 +68,10 @@ export interface TotpSetupDetails {
  *
  * NOTE the deliberate move away from an earlier `'live' | 'test'` env-string
  * shim: a tenant is now identified by its platform id, and the live/test
- * distinction (where it still matters — e.g. minting a partner-API token) is
- * carried separately on {@link TenantMembership.tenantKind}. Single-partner
- * Dev Admins still have exactly two memberships (their live + test tenants);
- * multi-partner sub-users have one membership per tenant they belong to.
+ * distinction (where it still matters — e.g. minting an API token) is
+ * carried separately on {@link TenantMembership.tenantKind}. An account owner
+ * who manages one account has exactly two memberships (its live + test tenants);
+ * a user invited into several accounts has one membership per tenant they belong to.
  */
 export type TenantId = string;
 
@@ -82,7 +82,7 @@ export type TenantId = string;
  *
  * Field shape mirrors the `GET /developer/memberships` response one-to-one
  * (the same membership-response shape) so the adapter mapping is
- * trivial. Multi-membership users (e.g. a sub-user of two partners) get one
+ * trivial. Multi-membership users (e.g. a user invited into two accounts) get one
  * entry per tenant, distinguished by `partnerId`.
  */
 export interface TenantMembership {
@@ -91,7 +91,7 @@ export interface TenantMembership {
   /** Human-readable switcher label, e.g. "Acme (Live)" (backend-synthesized). */
   readonly tenantName: string;
   /**
-   * Env mode of the tenant. Also the axis used when minting a partner-API
+   * Env mode of the tenant. Also the axis used when minting an API
    * token (maps to the developer API's `tenant=live|test` param).
    */
   readonly tenantKind: 'live' | 'test';
@@ -99,7 +99,7 @@ export interface TenantMembership {
   readonly role: 'OWNER' | 'SUB_USER';
   /** Status of the caller's membership row. */
   readonly status: 'ACTIVE' | 'PENDING' | 'SUSPENDED';
-  /** The partner the tenant belongs to — distinguishes cross-partner memberships. */
+  /** The account the tenant belongs to — distinguishes memberships across accounts. */
   readonly partnerId: string;
 }
 
@@ -238,7 +238,7 @@ export interface ChangePasswordInput {
  *      provider-hosted page own the whole thing end to end
  *      (HostedRedirectAuth)? This is a real, named choice every major IdP
  *      (Cognito, Auth0, Okta) offers explicitly, and — critically — a
- *      HOSTED-REDIRECT provider cannot honestly implement ANY
+ *      HOSTED-REDIRECT provider cannot actually implement ANY
  *      EmbeddedCredentialAuth method: signup, password reset, change-password,
  *      and MFA (both at sign-in and self-service management) all happen on
  *      the provider's own hosted pages under that mode, invisible to this

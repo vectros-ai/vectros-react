@@ -19,6 +19,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AuthError } from './errors';
+
 import {
   __resetVectrosApiTokenCacheForTest,
   clearVectrosApiTokenCache,
@@ -195,6 +197,82 @@ describe('getVectrosApiToken — base (tenant, context) path', () => {
     // Real-clock assertion (no fake timers here) that this returned fast —
     // a wrongly-applied retry would make this take >= SHARED_MINT_RETRY_DELAY_MS.
     expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('a rate-limit refusal (LIMIT_EXCEEDED) is NOT retried: the server said how long to wait', async () => {
+    let attempt = 0;
+    setPartnerApiTokenMinter(async () => {
+      attempt += 1;
+      throw new AuthError('LIMIT_EXCEEDED', 'Token exchange is rate limited; retry after 30 s.', 30);
+    });
+    const start = Date.now();
+    await expect(getVectrosApiToken('tnt_a')).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED', retryAfterSeconds: 30 });
+    expect(attempt).toBe(1);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('after a LIMIT_EXCEEDED, concurrent callers share the one refusal, the slot cools down for Retry-After, then mints again', async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-12T00:00:00Z') });
+    try {
+      let attempt = 0;
+      setPartnerApiTokenMinter(async () => {
+        attempt += 1;
+        if (attempt === 1) throw new AuthError('LIMIT_EXCEEDED', 'Token exchange is rate limited; retry after 5 s.', 5);
+        return { token: 'st_after_limit', expiresAtMs: Date.now() + 3_600_000 };
+      });
+      const [a, b] = await Promise.allSettled([getVectrosApiToken('tnt_a'), getVectrosApiToken('tnt_a')]);
+      expect(a).toMatchObject({ status: 'rejected', reason: { code: 'LIMIT_EXCEEDED' } });
+      expect(b).toMatchObject({ status: 'rejected', reason: { code: 'LIMIT_EXCEEDED' } });
+      expect(attempt).toBe(1);
+
+      // inside the cooldown: refused LOCALLY, with the seconds that remain, and no request is made
+      vi.setSystemTime(Date.now() + 2_000);
+      await expect(getVectrosApiToken('tnt_a')).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED', retryAfterSeconds: 3 });
+      expect(attempt).toBe(1);
+      // another slot is not affected
+      await expect(getVectrosApiToken('tnt_b')).resolves.toBe('st_after_limit');
+      expect(attempt).toBe(2);
+
+      // once Retry-After has passed, the next call mints again
+      vi.setSystemTime(Date.now() + 3_000);
+      await expect(getVectrosApiToken('tnt_a')).resolves.toBe('st_after_limit');
+      expect(attempt).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a LIMIT_EXCEEDED without Retry-After sets no cooldown: the next call mints again', async () => {
+    let attempt = 0;
+    setPartnerApiTokenMinter(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new AuthError('LIMIT_EXCEEDED', 'Token exchange is rate limited.');
+      return { token: 'st_no_ra', expiresAtMs: FAR_FUTURE };
+    });
+    await expect(getVectrosApiToken('tnt_a')).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+    await expect(getVectrosApiToken('tnt_a')).resolves.toBe('st_no_ra');
+    expect(attempt).toBe(2);
+  });
+
+  it('clearing the cache (a sign-out or a context switch) also drops a cooldown, and a huge Retry-After is capped at an hour', async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-12T00:00:00Z') });
+    try {
+      let attempt = 0;
+      setPartnerApiTokenMinter(async () => {
+        attempt += 1;
+        if (attempt <= 2) throw new AuthError('LIMIT_EXCEEDED', 'limited', 999_999);
+        return { token: 'st_after_clear', expiresAtMs: Date.now() + 3_600_000 };
+      });
+      await expect(getVectrosApiToken('tnt_a')).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+      clearVectrosApiTokenCache();
+      await expect(getVectrosApiToken('tnt_a')).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });   // a real attempt (2)
+      expect(attempt).toBe(2);
+      await expect(getVectrosApiToken('tnt_a')).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED', retryAfterSeconds: 3600 });   // capped
+      vi.setSystemTime(Date.now() + 3_600_000);
+      await expect(getVectrosApiToken('tnt_a')).resolves.toBe('st_after_clear');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a SECOND caller arriving DURING the retry delay window joins the SAME retry — does not start its own independent mint', async () => {

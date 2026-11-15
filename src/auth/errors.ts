@@ -66,6 +66,12 @@ export class AuthError extends Error {
   constructor(
     public readonly code: AuthErrorCode,
     message: string,
+    /**
+     * For `LIMIT_EXCEEDED` from the token exchange: how many seconds the server
+     * asked the caller to wait (its `Retry-After` header) before trying again.
+     * Undefined when the server sent none or the error is not a rate limit.
+     */
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     // Ensure prototype is preserved across the constructor boundary in

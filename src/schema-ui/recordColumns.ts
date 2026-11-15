@@ -110,9 +110,17 @@ export function deriveValueColumns(
     }));
 }
 
-/** The fieldIds the caller may filter on (schema `filterable` flag). */
+/**
+ * Field types whose `filterable` flag does not mean "match it as text": a `geo` field (stored filterable by default; its only filter
+ * is a location query) and the `asset`/`assets` types (document ids, not text a user would type).
+ */
+const NOT_TEXT_FILTERABLE_TYPES: ReadonlySet<string> = new Set(['geo', 'asset', 'assets']);
+
+/** The fieldIds the caller may filter on as text (schema `filterable` flag, less the types above). */
 export function filterableFieldIds(fields: ReadonlyArray<FieldDef>): string[] {
-  return fields.filter((f) => f.filterable === true).map((f) => f.fieldId);
+  return fields
+    .filter((f) => f.filterable === true && !NOT_TEXT_FILTERABLE_TYPES.has(String(f.fieldType)))
+    .map((f) => f.fieldId);
 }
 
 /** Treat undefined/null/empty-string as "blank" for formatting + sorting. */

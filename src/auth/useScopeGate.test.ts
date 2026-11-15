@@ -15,7 +15,13 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 
-import { OPS_LETTERS, canPerform, isOpsString, useScopeGate } from './useScopeGate';
+import {
+  BARE_GRANT_COVERS_EVERY_NAMED_INSTANCE,
+  OPS_LETTERS,
+  canPerform,
+  isOpsString,
+  useScopeGate,
+} from './useScopeGate';
 import { __resetVectrosApiTokenCacheForTest, setPartnerApiTokenMinter } from './vectrosApiTokenCache';
 
 // -----------------------------------------------------------------------------
@@ -24,6 +30,34 @@ import { __resetVectrosApiTokenCacheForTest, setPartnerApiTokenMinter } from './
 // PREDICATE's own contract: what it unions, what it deliberately refuses to
 // union, and that it never gets wider than what the caller can prove.
 // -----------------------------------------------------------------------------
+describe('canPerform — a per-agent runs ask answers as the API does', () => {
+  test('a bare runs grant covers every agent, so it answers a per-agent ask', () => {
+    expect(canPerform(['runs:c'], 'runs:c:incident-intake')).toBe(true);
+    expect(canPerform(['runs:cr'], 'runs:r:incident-intake')).toBe(true);
+  });
+
+  test('a grant naming one agent answers for that agent only', () => {
+    expect(canPerform(['runs:c:incident-intake'], 'runs:c:incident-intake')).toBe(true);
+    expect(canPerform(['runs:c:incident-intake'], 'runs:c:incident-update')).toBe(false);
+    expect(canPerform(['runs:c:incident-intake'], 'runs:r:incident-intake')).toBe(false); // starting is not reading
+  });
+
+  test('a named grant never satisfies a bare ask (the reverse direction stays narrow)', () => {
+    expect(canPerform(['runs:c:incident-intake'], 'runs:c')).toBe(false);
+  });
+
+  test('ops still union across a bare and a named entry, and still must all be present', () => {
+    expect(canPerform(['runs:c', 'runs:r:incident-intake'], 'runs:cr:incident-intake')).toBe(true);
+    expect(canPerform(['runs:c'], 'runs:cr:incident-intake')).toBe(false);
+  });
+
+  test('the exception is runs alone: a bare grant on any other resource still never answers a qualified ask', () => {
+    expect([...BARE_GRANT_COVERS_EVERY_NAMED_INSTANCE]).toEqual(['runs']);
+    expect(canPerform(['scripts:x'], 'scripts:x:daily-report')).toBe(false);
+    expect(canPerform(['records:r'], 'records:r:case')).toBe(false);
+  });
+});
+
 describe('canPerform', () => {
   test('wildcard grants everything', () => {
     expect(canPerform(['*'], 'users:cru')).toBe(true);

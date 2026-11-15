@@ -9,31 +9,37 @@ import { defineConfig } from 'tsup';
  * all stay external — npm installs them as ordinary transitive dependencies
  * for anyone who installs this package. We ship only this package's own source.
  *
- * THREE entry points, not one — this is load-bearing, not stylistic. The
- * main entry (`src/index.ts`) never imports either provider's concrete
- * class, only their types (type-only imports/exports are erased, so they
- * don't pull the SDK's runtime import into the bundle). Each provider lives
- * in its OWN entry (`src/auth/providers/{cognito,auth0}.ts`), each importing
- * only its own SDK. If a provider's class were instead re-exported as a
- * VALUE from the main entry, esbuild would bundle a static top-level
- * `import ... from 'aws-amplify/auth'` (or `@auth0/auth0-spa-js`) into the
- * ONE file every consumer imports — meaning an Auth0-only consumer's
- * bundler would fail to resolve `aws-amplify` (and vice versa) the moment
- * they imported ANYTHING from this package, defeating the whole point of
- * making both peer dependencies optional. See package.json's `exports` map
- * for the matching subpaths (`./providers/cognito`, `./providers/auth0`).
+ * SEVERAL entry points, not one: this is load-bearing, not stylistic.
+ *
+ * `src/core.ts` is the headless entry (`@vectros-ai/react/core`). Nothing it
+ * reaches imports MUI, Emotion, react-dom or react-router, so a React Native
+ * app or a server renderer can load it with those peers absent. The main
+ * entry (`src/index.ts`) re-exports it and adds the MUI components.
+ *
+ * Neither of those imports any sign-in provider's concrete class, only their
+ * types (type-only imports/exports are erased, so they don't pull the
+ * provider SDK's runtime import into the bundle). Each provider lives in its
+ * OWN entry (`src/auth/providers/*.ts`), each importing only its own SDK. If a
+ * provider's class were instead re-exported as a VALUE from the main entry,
+ * esbuild would bundle a static top-level `import ... from 'aws-amplify/auth'`
+ * (or `@auth0/auth0-spa-js`) into the ONE file every
+ * consumer imports, so a consumer without that SDK would fail to resolve it
+ * the moment they imported ANYTHING from this package, defeating the whole
+ * point of making the provider SDKs optional peers. (The Expo provider imports
+ * no package at all: the app passes its Expo modules in.) See package.json's
+ * `exports` map for the matching subpaths.
  *
  * JSX uses the automatic runtime (matches `"jsx": "react-jsx"` in tsconfig).
  */
 export default defineConfig({
-  entry: ['src/index.ts', 'src/auth/providers/cognito.ts', 'src/auth/providers/auth0.ts'],
+  entry: ['src/index.ts', 'src/core.ts', 'src/auth/providers/cognito.ts', 'src/auth/providers/auth0.ts', 'src/auth/providers/expo.ts'],
   format: ['esm', 'cjs'],
   outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.cjs' }),
   dts: true,
   clean: true,
   sourcemap: true,
   treeshake: true,
-  // MUST be true with 3+ entries: without it, each entry bundle inlines its
+  // MUST be true with several entries: without it, each entry bundle inlines its
   // OWN copy of every shared internal module (errors.ts, types.ts, etc.)
   // instead of importing one shared chunk. That silently breaks `instanceof
   // AuthError` across entry boundaries (e.g. AuthError thrown inside

@@ -1,7 +1,7 @@
 {
   "name": "@vectros-ai/react",
-  "version": "0.17.0",
-  "description": "Vectros React toolkit — the auth stack, Vectros API token cache, MFA, and UI primitives shared by the Vectros reference apps (admin-app, app.vectros.ai, casework-spa). Provider-agnostic by design: swap Cognito for Auth0/Clerk/OIDC behind a single adapter.",
+  "version": "0.18.0",
+  "description": "Vectros React toolkit — the auth stack, Vectros API token cache, MFA, and UI primitives shared by the Vectros reference apps (admin-app, app.vectros.ai, casework-spa), plus a headless /core entry and an Expo sign-in provider for React Native. Provider-agnostic by design: swap Cognito for Auth0/Clerk/OIDC behind a single adapter.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -25,6 +25,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./core": {
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.mjs"
+      },
+      "require": {
+        "types": "./dist/core.d.cts",
+        "default": "./dist/core.cjs"
+      }
+    },
     "./providers/cognito": {
       "import": {
         "types": "./dist/auth/providers/cognito.d.ts",
@@ -33,6 +43,16 @@
       "require": {
         "types": "./dist/auth/providers/cognito.d.cts",
         "default": "./dist/auth/providers/cognito.cjs"
+      }
+    },
+    "./providers/expo": {
+      "import": {
+        "types": "./dist/auth/providers/expo.d.ts",
+        "default": "./dist/auth/providers/expo.mjs"
+      },
+      "require": {
+        "types": "./dist/auth/providers/expo.d.cts",
+        "default": "./dist/auth/providers/expo.cjs"
       }
     },
     "./providers/auth0": {
@@ -44,6 +64,22 @@
         "types": "./dist/auth/providers/auth0.d.cts",
         "default": "./dist/auth/providers/auth0.cjs"
       }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "core": [
+        "./dist/core.d.ts"
+      ],
+      "providers/cognito": [
+        "./dist/auth/providers/cognito.d.ts"
+      ],
+      "providers/auth0": [
+        "./dist/auth/providers/auth0.d.ts"
+      ],
+      "providers/expo": [
+        "./dist/auth/providers/expo.d.ts"
+      ]
     }
   },
   "files": [
@@ -66,6 +102,8 @@
   "keywords": [
     "vectros",
     "react",
+    "react-native",
+    "expo",
     "auth",
     "cognito",
     "mfa",
@@ -90,7 +128,25 @@
     "@auth0/auth0-spa-js": {
       "optional": true
     },
+    "@emotion/react": {
+      "optional": true
+    },
+    "@emotion/styled": {
+      "optional": true
+    },
+    "@mui/icons-material": {
+      "optional": true
+    },
+    "@mui/material": {
+      "optional": true
+    },
     "aws-amplify": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "react-router": {
       "optional": true
     }
   },
@@ -114,7 +170,7 @@
     "@types/node": "22.10.5",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
-    "@vectros-ai/sdk": "0.49.0-staging.c89eebf3",
+    "@vectros-ai/sdk": "0.50.0-staging.714d34af",
     "aws-amplify": "6.16.3",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
