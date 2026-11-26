@@ -36,7 +36,7 @@ describe('published entry points', () => {
 
   it('every export maps import to .mjs/.d.ts and require to .cjs/.d.cts', () => {
     const subpaths = Object.keys(pkg.exports).sort();
-    expect(subpaths).toEqual(['.', './core', './providers/auth0', './providers/cognito', './providers/expo']);
+    expect(subpaths).toEqual(['.', './core', './providers/auth0', './providers/cognito', './providers/expo', './public']);
     for (const [key, cond] of Object.entries(pkg.exports)) {
       expect(cond.import.default, key).toMatch(/\.mjs$/);
       expect(cond.import.types, key).toMatch(/\.d\.ts$/);
@@ -58,6 +58,7 @@ describe('published entry points', () => {
 
   it('the entries the exports map names are the entries the build compiles', () => {
     expect(tsup).toContain("'src/core.ts'");
+    expect(tsup).toContain("'src/public.ts'");
     expect(tsup).toContain("'src/auth/providers/cognito.ts'");
     expect(tsup).toContain("'src/auth/providers/expo.ts'");
     expect(tsup).toContain("'src/auth/providers/auth0.ts'");
@@ -111,6 +112,19 @@ function reachablePackages(entry: string): Map<string, string> {
 describe('the providers/expo entry', () => {
   it('imports no package at runtime: the app passes in its Expo modules', () => {
     expect([...reachablePackages(resolve(srcDir, 'auth/providers/expo.ts')).keys()]).toEqual([]);
+  });
+});
+
+describe('the /public entry', () => {
+  const packages = reachablePackages(resolve(srcDir, 'public.ts'));
+
+  it('reaches no web-only package and no sign-in provider SDK (React Native and server renderers can use it)', () => {
+    const offending = [...packages].filter(([spec]) => WEB_ONLY.some((p) => spec === p || spec.startsWith(p)));
+    expect(offending).toEqual([]);
+  });
+
+  it('loads only the SDK and TanStack Query at runtime', () => {
+    expect([...packages.keys()].sort()).toEqual(['@tanstack/react-query', '@vectros-ai/sdk']);
   });
 });
 

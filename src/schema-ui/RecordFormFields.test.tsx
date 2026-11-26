@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { RecordFormFields } from './RecordFormFields';
 import { TestIntlProvider } from '../test/intl';
 import type { Vectros } from '@vectros-ai/sdk';
+import { coerceFieldValue } from './recordForm';
 import type { FieldErrors, RenderHints } from './recordForm';
 
 type FieldDef = Vectros.FieldDef;
@@ -203,5 +204,37 @@ describe('RecordFormFields', () => {
     const input = screen.getByLabelText('due');
     expect(input).toHaveAttribute('type', 'date');
     expect(input).toHaveValue('2026-06-23');
+  });
+  it('renders an `instant` field as a local date-time with seconds and milliseconds, and saves it back in UTC', () => {
+    const fields: FieldDef[] = [{ fieldId: 'decidedAt', fieldType: 'instant' as FieldDef['fieldType'] }];
+    const onChange = vi.fn();
+    // Expected values are computed in the test runner's own time zone, the zone the input shows.
+    const local = (iso: string): string => {
+      const d = new Date(iso);
+      const pad = (n: number, w = 2): string => String(n).padStart(w, '0');
+      return `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+        `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+    };
+    render(
+      <TestIntlProvider>
+        <RecordFormFields
+          fields={fields}
+          value={{ decidedAt: '2027-01-06T17:00:00.123Z' }}
+          errors={{}}
+          onChange={onChange}
+        />
+      </TestIntlProvider>,
+    );
+    const input = screen.getByLabelText('decidedAt');
+    expect(input).toHaveAttribute('type', 'datetime-local');
+    expect(input).toHaveAttribute('step', '0.001');
+    expect(input).toHaveValue(local('2027-01-06T17:00:00.123Z'));
+
+    // The field reports the local text; coerceFieldValue turns it into the stored UTC form.
+    fireEvent.change(input, { target: { value: local('2027-01-08T09:30:15.250Z') } });
+    const [field, raw] = onChange.mock.calls.at(-1)!;
+    expect(field).toEqual(expect.objectContaining({ fieldId: 'decidedAt' }));
+    expect(raw).toBe(local('2027-01-08T09:30:15.250Z'));
+    expect(coerceFieldValue(field, raw)).toBe('2027-01-08T09:30:15.250Z');
   });
 });

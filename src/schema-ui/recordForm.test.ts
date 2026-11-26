@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 import {
   coerceFieldValue,
   enumOptions,
+  fromInstantLocalInputValue,
+  isInstantField,
+  toInstantLocalInputValue,
   fieldHelpText,
   fieldLabel,
   fieldWidget,
@@ -39,7 +42,7 @@ const field = (fieldId: string, fieldType: string, extra: Partial<FieldDef> = {}
 
 describe('isFormEditable', () => {
   it('accepts scalar types and rejects complex/unknown', () => {
-    for (const t of ['string', 'number', 'boolean', 'date', 'enum']) {
+    for (const t of ['string', 'number', 'boolean', 'date', 'instant', 'enum']) {
       expect(isFormEditable(field('x', t))).toBe(true);
     }
     for (const t of ['array', 'object', 'reference', 'mystery']) {
@@ -253,6 +256,47 @@ describe('temporal input value normalization', () => {
     expect(toDateTimeLocalInputValue('2026-06-23T14:30:59.123Z')).toBe('2026-06-23T14:30');
     expect(toDateTimeLocalInputValue('2026-06-23 14:30:00')).toBe('2026-06-23T14:30');
     expect(toDateTimeLocalInputValue('nonsense')).toBe('');
+  });
+});
+
+describe('instant fields', () => {
+  const f = (fieldType: string): Vectros.FieldDef =>
+    ({ fieldId: 'when', fieldType }) as Vectros.FieldDef;
+  // Local wall-clock for a UTC instant, computed the same way the browser does, so
+  // these expectations hold in any time zone the tests run in.
+  const local = (iso: string): string => {
+    const d = new Date(iso);
+    const p = (n: number): string => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  };
+
+  it('is recognised, renders as date+time, and is form-editable', () => {
+    expect(isInstantField(f('instant'))).toBe(true);
+    expect(isInstantField(f('date'))).toBe(false);
+    expect(temporalInputKind(f('instant'))).toBe('datetime');
+    expect(isFormEditable(f('instant'))).toBe(true);
+  });
+
+  it('shows a stored UTC value in local time, and nothing for an unreadable one', () => {
+    expect(toInstantLocalInputValue('2027-01-06T17:00:00.000Z')).toBe(local('2027-01-06T17:00:00.000Z'));
+    expect(toInstantLocalInputValue('2027-01-06T18:00:00+01:00')).toBe(local('2027-01-06T17:00:00.000Z'));
+    expect(toInstantLocalInputValue('2027-01-06T17:00')).toBe('');
+    expect(toInstantLocalInputValue('2027-01-06')).toBe('');
+    expect(toInstantLocalInputValue('nonsense')).toBe('');
+    expect(toInstantLocalInputValue(1799254800000)).toBe('');
+  });
+
+  it('saves a local input value as the UTC instant it names, round-tripping a stored value', () => {
+    const stored = '2027-01-06T17:00:00.000Z';
+    expect(fromInstantLocalInputValue(toInstantLocalInputValue(stored))).toBe(stored);
+    expect(coerceFieldValue(f('instant'), toInstantLocalInputValue(stored))).toBe(stored);
+    expect(fromInstantLocalInputValue('2027-01-06T09:15:30')).toBe(new Date(2027, 0, 6, 9, 15, 30).toISOString());
+  });
+
+  it('leaves an unreadable input for the server to refuse, and clears an empty one', () => {
+    expect(fromInstantLocalInputValue('soon')).toBe('soon');
+    expect(fromInstantLocalInputValue('2027-01-06T17:00:00Z')).toBe('2027-01-06T17:00:00Z');
+    expect(coerceFieldValue(f('instant'), '')).toBeUndefined();
   });
 });
 

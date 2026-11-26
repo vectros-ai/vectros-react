@@ -3,6 +3,18 @@
 All notable changes to `@vectros-ai/react` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.19.0 — 2026-11-25
+
+### Added
+
+- **The `@vectros-ai/react/public` entry** (`createPublicClient`, `usePublicRecord`, `usePublicList`): anonymous reads of public records with a publishable key. Needs `@vectros-ai/sdk` 0.50.0 or later.
+- **Range filters in public search:** a `filters` value may be a `PublicRange`, `{ from?, to? }`, on a filterable `number`, `date` or `instant` field; it is sent as `filter.<field>.from` and `filter.<field>.to` (both inclusive). A date bound is a calendar day, `YYYY-MM-DD`, in UTC. Needs platform 0.51.0 or later.
+- **Set filters in public search:** a `filters` value may be a `PublicSet`, `{ in: [...] }`, of 1 to 10 strings or numbers on a filterable `string`, `enum`, `number` or `instant` field; it is sent as `filter.<field>.in`, sorted and without duplicates, and matches any value in the set. Needs platform 0.51.0 or later.
+- **Public search with filters and no `q`:** `search(type, { filters })` without `q` (a blank `q` is not sent) lists the type's published records that match the filters, in a fixed order, the same on every page. Needs platform 0.51.0 or later.
+- **`instant` fields in record forms.** `RecordFormFields` edits an `instant` field with a date-time input in the viewer's local time (seconds and milliseconds kept) and saves it in UTC; a local time skipped by a daylight-saving change is left for the server to refuse. In the hour a daylight-saving change repeats, the input shows local time without its offset, so the two moments in that hour look the same and a time typed there is read as the first of them. The headless helpers `isInstantField`, `toInstantLocalInputValue` and `fromInstantLocalInputValue` are exported. Needs platform 0.51.0 or later.
+- **Instant filters and ordering in public search:** a `filters` value on a filterable `instant` field may be a value, a `PublicRange` or a `PublicSet`, each moment written `YYYY-MM-DDTHH:MM:SS.sssZ` (`new Date(...).toISOString()` gives it); `search(type, { sortBy, order })` puts the results in the order of a filterable `number`, `date` or `instant` field the type's public view publishes (`order`: `'asc'`, the default, or `'desc'`), records without a value last. Needs platform 0.51.0 or later.
+- The `serverSecret` description of an issued key says that a retry that repeats the same `Idempotency-Key` returns the secret again.
+
 ## 0.18.0 — 2026-11-14
 
 ### Breaking changes

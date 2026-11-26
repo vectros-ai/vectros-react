@@ -112,6 +112,7 @@ export const FORM_EDITABLE_FIELD_TYPES = new Set([
   'boolean',
   'date',
   'datetime',
+  'instant',
   'enum',
 ]);
 
@@ -131,6 +132,9 @@ export function temporalInputKind(
   hints?: RenderHints,
 ): 'date' | 'datetime' | null {
   if ((field.fieldType as string) === 'datetime') return 'datetime';
+  // An `instant` is one moment in time: it renders date+time, shown and entered
+  // in the viewer's local time (see `toInstantLocalInputValue`).
+  if (isInstantField(field)) return 'datetime';
   if (field.fieldType !== 'date') return null;
   // A `date` widget hint is the escape hatch to keep a field date-only.
   if (fieldWidget(field, hints) === 'date') return 'date';
@@ -158,6 +162,67 @@ export function toDateTimeLocalInputValue(value: unknown): string {
   const dateTime = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(trimmed);
   if (dateTime) return `${dateTime[1] ?? ''}T${dateTime[2] ?? ''}`;
   return '';
+}
+
+/**
+ * Whether a field is an `instant`: a moment in time the platform stores in UTC
+ * (for example `2027-01-06T17:00:00.000Z`). Unlike a `date` field, its form
+ * input converts between the viewer's local time and UTC. (`instant` may not be
+ * in the installed SDK's `FieldType` union yet, so the check widens to a string.)
+ */
+export function isInstantField(field: FieldDef): boolean {
+  return (field.fieldType as string) === 'instant';
+}
+
+/**
+ * Normalize a stored `instant` value (UTC) to a datetime-local input's value in
+ * the viewer's local time: `YYYY-MM-DDTHH:mm:ss`, plus `.SSS` when the value has
+ * milliseconds, so editing another part of the input never drops them (render the
+ * input with `step` 0.001). Empty if the value is not a date-time with a time zone
+ * offset, so an unreadable value is never shown as a wrong wall-clock time.
+ */
+export function toInstantLocalInputValue(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}(:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:\d{2})$/.test(trimmed)) {
+    return '';
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return '';
+  return localDateTimeString(date);
+}
+
+/** `YYYY-MM-DDTHH:mm:ss[.SSS]` for `date` in local time. */
+function localDateTimeString(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const ms = date.getMilliseconds();
+  return (
+    `${String(date.getFullYear()).padStart(4, '0')}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    (ms ? `.${String(ms).padStart(3, '0')}` : '')
+  );
+}
+
+/**
+ * Convert a datetime-local input's value (`YYYY-MM-DDTHH:mm[:ss]`, the viewer's
+ * local time) to the UTC form an `instant` field stores. Returns the input
+ * unchanged when it does not read as a local date-time, so the server's
+ * validation reports it.
+ */
+export function fromInstantLocalInputValue(text: string): string {
+  const trimmed = text.trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(trimmed)) return text;
+  // A date-time without an offset is read as local time.
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return text;
+  // A local time that does not exist (skipped by a daylight-saving change) is moved by
+  // the Date constructor to another moment; leave it for the server to report rather
+  // than save a time the user did not enter.
+  const [d, t = ''] = trimmed.split('T');
+  const [hms, frac = ''] = t.split('.');
+  const entered = `${d}T${hms?.length === 5 ? `${hms}:00` : hms}${frac && Number(frac) ? `.${frac.padEnd(3, '0')}` : ''}`;
+  if (localDateTimeString(date) !== entered) return text;
+  return date.toISOString();
 }
 
 /** Whether a field's type has a first-class typed input in the form view. */
@@ -220,6 +285,7 @@ export function coerceFieldValue(field: FieldDef, input: string | boolean): unkn
     return Number.isNaN(n) ? text : n; // keep the raw text if not yet numeric
   }
   if (text === '' && field.fieldType !== 'string') return undefined;
+  if (isInstantField(field)) return fromInstantLocalInputValue(text);
   return text; // string, date, enum → stored as-is
 }
 

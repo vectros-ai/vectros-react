@@ -72,6 +72,16 @@ so they look and behave the same without copy-paste:
     naming the status when `detail` is `undefined`.
 
   Together, `status`, `errorCode` and `detail` let you choose your own copy without wrapping the runner.
+- **Public reads** — `createPublicClient({ key: 'pub_...' })` from `@vectros-ai/react/public` reads an app context's public records
+  anonymously: `get(type, publicId)`, `list(type, { by: { city: 'Lisbon' } })` (one published lookup field; pass
+  `nextCursor` back as `cursor`), `listAll(...)` (every page, as an async iterable) and `search(type, { q, mode, near, filters, sortBy, order })`.
+  It takes only a publishable key and refuses an `sk_`, `ssk_` or `st_` credential; a server key (`pubs_...`) needs its
+  `serverSecret`, is refused in a browser page, a Web Worker or a React Native app, and sends its secret only to an
+  `https:` base URL (plain `http:` only to localhost). Failed reads throw the SDK's errors (read them with
+  `statusCodeOf` and `errorCodeOf`). `usePublicRecord` and `usePublicList` wrap it in TanStack Query. It is its own
+  entry because it is the one part of this package that loads `@vectros-ai/sdk` at runtime: `/core` stays type-only on
+  the SDK. The package's `@vectros-ai/sdk` peer range stays `>=0.9.0`, so installing it does not force an SDK
+  upgrade; `/public` itself needs 0.50.0 or later, checked when `createPublicClient` is called (it throws on an older SDK).
 - **Schema-driven record UI** — `RecordFormFields` renders a typed input per schema field
   (string/number/boolean/date/enum) from a `FieldDef[]` + `renderHints`, and
   `deriveValueColumns`/`sortRecords`/`payloadMatchesQuery` derive a records-list table (columns,

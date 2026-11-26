@@ -32,7 +32,7 @@ import { defineConfig } from 'tsup';
  * JSX uses the automatic runtime (matches `"jsx": "react-jsx"` in tsconfig).
  */
 export default defineConfig({
-  entry: ['src/index.ts', 'src/core.ts', 'src/auth/providers/cognito.ts', 'src/auth/providers/auth0.ts', 'src/auth/providers/expo.ts'],
+  entry: ['src/index.ts', 'src/core.ts', 'src/public.ts', 'src/auth/providers/cognito.ts', 'src/auth/providers/auth0.ts', 'src/auth/providers/expo.ts'],
   format: ['esm', 'cjs'],
   outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.cjs' }),
   dts: true,

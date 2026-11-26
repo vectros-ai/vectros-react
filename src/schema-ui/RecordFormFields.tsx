@@ -39,6 +39,8 @@ import {
   temporalInputKind,
   toDateInputValue,
   toDateTimeLocalInputValue,
+  isInstantField,
+  toInstantLocalInputValue,
   unstructuredKeys,
 } from './recordForm';
 import type { FieldErrors, RenderHints } from './recordForm';
@@ -181,7 +183,9 @@ export function RecordFormFields({
             : 'text';
     const displayValue =
       temporal === 'datetime'
-        ? toDateTimeLocalInputValue(current)
+        ? isInstantField(field)
+          ? toInstantLocalInputValue(current)
+          : toDateTimeLocalInputValue(current)
         : temporal === 'date'
           ? toDateInputValue(current)
           : current === undefined || current === null
@@ -202,7 +206,15 @@ export function RecordFormFields({
         size="small"
         sx={{ maxWidth: 480 }}
         // Temporal inputs always show a format placeholder → keep the label shrunk.
-        slotProps={temporal !== null ? { inputLabel: { shrink: true } } : undefined}
+        // An instant keeps its seconds and milliseconds through an edit (step 0.001).
+        slotProps={
+          temporal !== null
+            ? {
+                inputLabel: { shrink: true },
+                ...(isInstantField(field) ? { htmlInput: { step: 0.001 } } : {}),
+              }
+            : undefined
+        }
       />
     );
   };

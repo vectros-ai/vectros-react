@@ -1,0 +1,17 @@
+{
+  "about": "The one spelling of a public search set (filter.<field>.in): unique values, ascending by value when every value is a plain decimal in its shortest form, otherwise in UTF-16 code-unit order. Read by the client tests here and by the server tests; both must produce or accept exactly `canonical`.",
+  "cases": [
+    { "values": ["10", "9"], "canonical": "9,10" },
+    { "values": ["100000000000000.002", "100000000000000.001"], "canonical": "100000000000000.001,100000000000000.002" },
+    { "values": ["0.000000000000002", "0.000000000000001"], "canonical": "0.000000000000001,0.000000000000002" },
+    { "values": ["999999999999999", "-999999999999999"], "canonical": "-999999999999999,999999999999999" },
+    { "values": ["12", "-2.5", "-7"], "canonical": "-7,-2.5,12" },
+    { "values": ["0.5", "0", "-0.5"], "canonical": "-0.5,0,0.5" },
+    { "values": ["b", "10", "a", "9"], "canonical": "10,9,a,b" },
+    { "values": ["9", "010"], "canonical": "010,9" },
+    { "values": ["z", "é", "e"], "canonical": "e,z,é" },
+    { "values": ["York", "Leeds", "Bath"], "canonical": "Bath,Leeds,York" },
+    { "values": ["a", "b", "a"], "canonical": "a,b" },
+    { "values": ["a:b", "c\\d"], "canonical": "a:b,c\\d" }
+  ]
+}

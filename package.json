@@ -1,6 +1,6 @@
 {
   "name": "@vectros-ai/react",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Vectros React toolkit — the auth stack, Vectros API token cache, MFA, and UI primitives shared by the Vectros reference apps (admin-app, app.vectros.ai, casework-spa), plus a headless /core entry and an Expo sign-in provider for React Native. Provider-agnostic by design: swap Cognito for Auth0/Clerk/OIDC behind a single adapter.",
   "license": "Apache-2.0",
   "repository": {
@@ -33,6 +33,16 @@
       "require": {
         "types": "./dist/core.d.cts",
         "default": "./dist/core.cjs"
+      }
+    },
+    "./public": {
+      "import": {
+        "types": "./dist/public.d.ts",
+        "default": "./dist/public.mjs"
+      },
+      "require": {
+        "types": "./dist/public.d.cts",
+        "default": "./dist/public.cjs"
       }
     },
     "./providers/cognito": {
@@ -70,6 +80,9 @@
     "*": {
       "core": [
         "./dist/core.d.ts"
+      ],
+      "public": [
+        "./dist/public.d.ts"
       ],
       "providers/cognito": [
         "./dist/auth/providers/cognito.d.ts"
@@ -170,7 +183,7 @@
     "@types/node": "22.10.5",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
-    "@vectros-ai/sdk": "0.50.0-staging.714d34af",
+    "@vectros-ai/sdk": "0.51.0-staging.8755d08b",
     "aws-amplify": "6.16.3",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
